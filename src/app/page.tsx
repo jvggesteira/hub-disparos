@@ -22,8 +22,9 @@ import {
   ArrowUpDown,
   Search,
   Eye,
+  Clock,
 } from 'lucide-react';
-import { getDashboardStats, getDisparoClients, getClientsWithLowBalance, getAllClientsOverview } from '@/hooks/use-disparos';
+import { getDashboardStats, getDisparoClients, getClientsWithLowBalance, getAllClientsOverview, getSLAAlerts } from '@/hooks/use-disparos';
 import type { DisparoClient } from '@/hooks/use-disparos';
 
 type LowBalanceAlert = { clientId: number; clientName: string; clientCompany: string | null; totalBalance: number; totalContracted: number };
@@ -225,6 +226,8 @@ export default function DisparosPage() {
 
   // UI state
   const [alertOpen, setAlertOpen] = useState(true);
+  const [slaAlerts, setSlaAlerts] = useState<Array<{ type: string; clientName: string; clientId: number; packageName: string; packageId: number; message: string; severity: 'warning' | 'danger'; daysSince: number }>>([]);
+  const [slaAlertOpen, setSlaAlertOpen] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'todos' | ClientStatus>('todos');
   const [overviewSearch, setOverviewSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('gross');
@@ -262,15 +265,17 @@ export default function DisparosPage() {
         end = dates.end;
       }
 
-      const [statsData, clientsData, lowBalance] = await Promise.all([
+      const [statsData, clientsData, lowBalance, slaData] = await Promise.all([
         getDashboardStats(start, end),
         getDisparoClients(),
         getClientsWithLowBalance(),
+        getSLAAlerts(),
       ]);
 
       setStats(statsData);
       setClients(clientsData);
       setLowBalanceClients(lowBalance);
+      setSlaAlerts(slaData);
     } catch (err) {
       console.error('Erro ao carregar dados de disparos:', err);
     } finally {
@@ -461,6 +466,43 @@ export default function DisparosPage() {
           )}
 
           {/* ---------------------------------------------------------------- */}
+          {/* SLA alerts banner                                                */}
+          {/* ---------------------------------------------------------------- */}
+          {slaAlerts.length > 0 && slaAlertOpen && (
+            <div className="mb-6 bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 rounded-2xl p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-orange-800 dark:text-orange-300">
+                      Alertas de SLA ({slaAlerts.length})
+                    </p>
+                    <p className="text-xs text-orange-700 dark:text-orange-400/70 mt-0.5">
+                      Pacotes que precisam de atenção:
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {slaAlerts.map((a, i) => (
+                        <button key={i} onClick={() => router.push(`/clientes/${a.clientId}`)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${
+                            a.severity === 'danger'
+                              ? 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-300 hover:bg-red-200'
+                              : 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-300 hover:bg-orange-200'
+                          }`}>
+                          {a.clientName} - {a.packageName}
+                          <span className="opacity-60">({a.message})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => setSlaAlertOpen(false)} className="text-orange-600 dark:text-orange-400 hover:text-orange-800 p-1">
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ---------------------------------------------------------------- */}
           {/* Operacional stats                                                */}
           {/* ---------------------------------------------------------------- */}
           <div className="mb-6">
@@ -525,6 +567,41 @@ export default function DisparosPage() {
                   <StatCard title="Custo Plataforma" value={formatCurrency(stats?.totalPlatformCost ?? 0)} icon={Wallet} color="text-red-500" />
                   <StatCard title="Receita Empresa" value={formatCurrency(stats?.totalCompanyRevenue ?? 0)} icon={TrendingUp} color="text-purple-600" />
                   <StatCard title="Receita Parceiro" value={formatCurrency(stats?.totalPartnerRevenue ?? 0)} icon={Users} color="text-blue-600" />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ---------------------------------------------------------------- */}
+          {/* Qualidade dos Contatos                                           */}
+          {/* ---------------------------------------------------------------- */}
+          <div className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-500 dark:text-white/40 uppercase tracking-wider mb-3">
+              Qualidade dos Contatos
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {loading ? (
+                <><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /></>
+              ) : (
+                <>
+                  <StatCard
+                    title="Taxa de Entrega"
+                    value={stats && stats.totalSent > 0 ? `${((stats.totalDelivered / stats.totalSent) * 100).toFixed(1)}%` : '0%'}
+                    subtitle={`${formatNumber(stats?.totalDelivered ?? 0)} de ${formatNumber(stats?.totalSent ?? 0)} enviadas`}
+                    icon={CheckCircle} color="text-green-600"
+                  />
+                  <StatCard
+                    title="Msgs Não Entregues"
+                    value={formatNumber((stats?.totalSent ?? 0) - (stats?.totalDelivered ?? 0))}
+                    subtitle={stats && stats.totalSent > 0 ? `${(((stats.totalSent - stats.totalDelivered) / stats.totalSent) * 100).toFixed(1)}% de perda` : '0% de perda'}
+                    icon={AlertTriangle} color="text-red-500"
+                  />
+                  <StatCard
+                    title="Media por Disparo"
+                    value={stats && stats.totalDispatches > 0 ? formatNumber(Math.round(stats.totalDelivered / stats.totalDispatches)) : '0'}
+                    subtitle="msgs entregues por disparo"
+                    icon={BarChart3} color="text-blue-600"
+                  />
                 </>
               )}
             </div>

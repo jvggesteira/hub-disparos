@@ -18,14 +18,14 @@ import {
 import {
   ArrowLeft, Plus, Package, Send, BarChart3, Wallet, DollarSign, Pencil,
   Trash2, TrendingUp, Loader2, Calendar, ChevronDown, AlertTriangle, RotateCcw, ExternalLink, Copy,
-  FileSpreadsheet, Phone, Upload, X, Download, Users,
+  FileSpreadsheet, Phone, Upload, X, Download, Users, Target,
 } from 'lucide-react';
 import {
   getDisparoClientById, getPackagesByClient, getClientStats, getDispatchesByClient,
   getDispatchesByClientFiltered, getPackageBalance, createPackage, updatePackage,
   deletePackage, refundPackageMessages, createDispatch, updateDispatch, deleteDispatch,
-  getResultByDispatch, upsertDispatchResult, getDispatchResultsForChart,
-  uploadDispatchFile,
+  getResultByDispatch, upsertDispatchResult, getDispatchResultsForChartEnhanced,
+  uploadDispatchFile, getClientROIMetrics, getClientMonthlyTrends,
 } from '@/hooks/use-disparos';
 import type { DisparoClient, DisparoPackage, DisparoDispatch, DisparoResult } from '@/hooks/use-disparos';
 import {
@@ -35,6 +35,17 @@ import {
 
 function fmt(v: number) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v); }
 function fmtN(v: number) { return new Intl.NumberFormat('pt-BR').format(v); }
+/** Extract YYYY-MM-DD from a timestamptz string, interpreting as Brazil timezone */
+function toLocalDate(isoStr: string): string {
+  const d = new Date(isoStr);
+  const offset = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - offset * 60000);
+  return local.toISOString().split('T')[0];
+}
+function fmtDate(isoStr: string): string {
+  const parts = toLocalDate(isoStr).split('-');
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
 
 const STATUS_BADGE: Record<string, string> = {
   ativo: 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
@@ -82,13 +93,15 @@ export default function ClientDetailPage() {
   const [stats, setStats] = useState<any>(null);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pacotes' | 'disparos' | 'resultados'>('pacotes');
+  const [activeTab, setActiveTab] = useState<'pacotes' | 'disparos' | 'resultados' | 'roi' | 'tendencias'>('pacotes');
+  const [roiMetrics, setRoiMetrics] = useState<any>(null);
+  const [monthlyTrends, setMonthlyTrends] = useState<any[]>([]);
 
   // Package form
   const [pkgOpen, setPkgOpen] = useState(false);
   const [pkgEditId, setPkgEditId] = useState<number | null>(null);
   const [pkgDeleteId, setPkgDeleteId] = useState<number | null>(null);
-  const [pkgForm, setPkgForm] = useState({ name: '', contractedMessages: '', pricePerMessage: '', platformCost: '0.20', notes: '' });
+  const [pkgForm, setPkgForm] = useState({ name: '', contractedMessages: '', pricePerMessage: '', platformCost: '0.20', notes: '', purchaseDate: '' });
   const [pkgSaving, setPkgSaving] = useState(false);
   const [pkgBalances, setPkgBalances] = useState<Record<number, any>>({});
 
@@ -100,7 +113,7 @@ export default function ClientDetailPage() {
   const [dispOpen, setDispOpen] = useState(false);
   const [dispEditId, setDispEditId] = useState<number | null>(null);
   const [dispDeleteId, setDispDeleteId] = useState<number | null>(null);
-  const [dispForm, setDispForm] = useState({ packageId: '', name: '', dispatchDate: '', sentMessages: '', deliveredMessages: '', redirectionCost: '', notes: '', contactFileUrl: '', contactFileName: '', contactCount: '', redirectNumbers: '' });
+  const [dispForm, setDispForm] = useState({ packageId: '', name: '', dispatchDate: '', sentMessages: '', deliveredMessages: '', readMessages: '', repliedMessages: '', clickedMessages: '', redirectionCost: '', notes: '', contactFileUrl: '', contactFileName: '', contactCount: '', redirectNumbers: '' });
   const [dispSaving, setDispSaving] = useState(false);
   const [dispFile, setDispFile] = useState<File | null>(null);
   const [dispFileUploading, setDispFileUploading] = useState(false);
@@ -118,12 +131,15 @@ export default function ClientDetailPage() {
 
   async function loadData() {
     try {
-      const [c, p, s, d, chart] = await Promise.all([
+      const [c, p, s, d, chart, roi, trends] = await Promise.all([
         getDisparoClientById(clientId), getPackagesByClient(clientId),
         getClientStats(clientId), getDispatchesByClient(clientId),
-        getDispatchResultsForChart(clientId),
+        getDispatchResultsForChartEnhanced(clientId),
+        getClientROIMetrics(clientId),
+        getClientMonthlyTrends(clientId),
       ]);
       setClient(c); setPackages(p.filter(pk => pk.is_active)); setStats(s); setDispatches(d); setChartData(chart);
+      setRoiMetrics(roi); setMonthlyTrends(trends);
       // Load balances
       const bals: Record<number, any> = {};
       for (const pk of p.filter(pk => pk.is_active)) {
@@ -154,7 +170,7 @@ export default function ClientDetailPage() {
   }, [clientId, periodKey, customStart, customEnd]);
 
   // ─── Package Handlers ────────────────────────────────────────────────────────
-  const resetPkgForm = () => setPkgForm({ name: '', contractedMessages: '', pricePerMessage: '', platformCost: '0.20', notes: '' });
+  const resetPkgForm = () => setPkgForm({ name: '', contractedMessages: '', pricePerMessage: '', platformCost: '0.20', notes: '', purchaseDate: '' });
 
   async function handlePkgSubmit() {
     setPkgSaving(true);
@@ -164,13 +180,14 @@ export default function ClientDetailPage() {
           name: pkgForm.name, contracted_messages: parseInt(pkgForm.contractedMessages),
           price_per_message: parseFloat(pkgForm.pricePerMessage), platform_cost_per_message: parseFloat(pkgForm.platformCost),
           notes: pkgForm.notes || null,
+          purchase_date: pkgForm.purchaseDate ? `${pkgForm.purchaseDate}T12:00:00` : null,
         } as any);
         toast({ title: 'Pacote atualizado!', className: 'bg-green-600 text-white border-none' });
       } else {
         await createPackage({
           client_id: clientId, name: pkgForm.name, contracted_messages: parseInt(pkgForm.contractedMessages),
           price_per_message: parseFloat(pkgForm.pricePerMessage), platform_cost_per_message: parseFloat(pkgForm.platformCost),
-          notes: pkgForm.notes,
+          notes: pkgForm.notes, purchase_date: pkgForm.purchaseDate || undefined,
         });
         toast({ title: 'Pacote criado!', className: 'bg-green-600 text-white border-none' });
       }
@@ -200,7 +217,7 @@ export default function ClientDetailPage() {
   }
 
   // ─── Dispatch Handlers ───────────────────────────────────────────────────────
-  const resetDispForm = () => { setDispForm({ packageId: '', name: '', dispatchDate: '', sentMessages: '', deliveredMessages: '', redirectionCost: '', notes: '', contactFileUrl: '', contactFileName: '', contactCount: '', redirectNumbers: '' }); setDispFile(null); };
+  const resetDispForm = () => { setDispForm({ packageId: '', name: '', dispatchDate: '', sentMessages: '', deliveredMessages: '', readMessages: '', repliedMessages: '', clickedMessages: '', redirectionCost: '', notes: '', contactFileUrl: '', contactFileName: '', contactCount: '', redirectNumbers: '' }); setDispFile(null); };
 
   async function handleDispSubmit() {
     setDispSaving(true);
@@ -226,6 +243,9 @@ export default function ClientDetailPage() {
         await updateDispatch(dispEditId, {
           name: dispForm.name, dispatch_date: dispForm.dispatchDate,
           sent_messages: parseInt(dispForm.sentMessages), delivered_messages: parseInt(dispForm.deliveredMessages),
+          read_messages: dispForm.readMessages ? parseInt(dispForm.readMessages) : 0,
+          replied_messages: dispForm.repliedMessages ? parseInt(dispForm.repliedMessages) : 0,
+          clicked_messages: dispForm.clickedMessages ? parseInt(dispForm.clickedMessages) : 0,
           redirection_cost: dispForm.redirectionCost ? parseFloat(dispForm.redirectionCost) : null,
           notes: dispForm.notes || null,
           contact_file_url: fileUrl || null, contact_file_name: fileName || null,
@@ -238,6 +258,9 @@ export default function ClientDetailPage() {
           package_id: parseInt(dispForm.packageId), client_id: clientId, name: dispForm.name,
           dispatch_date: dispForm.dispatchDate,
           sent_messages: parseInt(dispForm.sentMessages), delivered_messages: parseInt(dispForm.deliveredMessages),
+          read_messages: dispForm.readMessages ? parseInt(dispForm.readMessages) : undefined,
+          replied_messages: dispForm.repliedMessages ? parseInt(dispForm.repliedMessages) : undefined,
+          clicked_messages: dispForm.clickedMessages ? parseInt(dispForm.clickedMessages) : undefined,
           redirection_cost: dispForm.redirectionCost ? parseFloat(dispForm.redirectionCost) : undefined,
           notes: dispForm.notes,
           contact_file_url: fileUrl, contact_file_name: fileName,
@@ -406,11 +429,17 @@ export default function ClientDetailPage() {
             )}
 
             {/* Tabs */}
-            <div className="flex gap-1 border-b border-slate-200 dark:border-white/[0.06]">
-              {(['pacotes', 'disparos', 'resultados'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === tab ? 'text-purple-600 border-b-2 border-purple-600' : 'text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white'}`}>
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            <div className="flex gap-1 border-b border-slate-200 dark:border-white/[0.06] overflow-x-auto">
+              {([
+                { key: 'pacotes', label: 'Pacotes' },
+                { key: 'disparos', label: 'Disparos' },
+                { key: 'resultados', label: 'Resultados' },
+                { key: 'roi', label: 'ROI & Funil' },
+                { key: 'tendencias', label: 'Tendencias' },
+              ] as const).map(tab => (
+                <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                  className={`px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.key ? 'text-purple-600 border-b-2 border-purple-600' : 'text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white'}`}>
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -440,14 +469,14 @@ export default function ClientDetailPage() {
                             <div className="flex items-start justify-between mb-3">
                               <div>
                                 <h3 className="font-semibold text-slate-900 dark:text-white">{pkg.name}</h3>
-                                <p className="text-xs text-slate-500 dark:text-white/40">{fmtN(pkg.contracted_messages)} msgs contratadas · {fmt(Number(pkg.price_per_message))}/msg</p>
+                                <p className="text-xs text-slate-500 dark:text-white/40">{fmtN(pkg.contracted_messages)} msgs contratadas · {fmt(Number(pkg.price_per_message))}/msg{pkg.purchase_date ? ` · Compra: ${fmtDate(pkg.purchase_date)}` : ''}</p>
                               </div>
                               <div className="flex gap-1">
                                 <button onClick={() => { setRefundPkgId(pkg.id); setRefundAmount(''); }}
                                   className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-yellow-500" title="Estorno">
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </button>
-                                <button onClick={() => { setPkgEditId(pkg.id); setPkgForm({ name: pkg.name, contractedMessages: String(pkg.contracted_messages), pricePerMessage: String(pkg.price_per_message), platformCost: String(pkg.platform_cost_per_message), notes: pkg.notes || '' }); setPkgOpen(true); }}
+                                <button onClick={() => { setPkgEditId(pkg.id); setPkgForm({ name: pkg.name, contractedMessages: String(pkg.contracted_messages), pricePerMessage: String(pkg.price_per_message), platformCost: String(pkg.platform_cost_per_message), notes: pkg.notes || '', purchaseDate: pkg.purchase_date ? toLocalDate(pkg.purchase_date) : '' }); setPkgOpen(true); }}
                                   className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
                                   <Pencil className="h-3.5 w-3.5" />
                                 </button>
@@ -515,14 +544,14 @@ export default function ClientDetailPage() {
                               <div>
                                 <h3 className="font-semibold text-sm text-slate-900 dark:text-white">{d.name}</h3>
                                 <p className="text-xs text-slate-500 dark:text-white/40">
-                                  {(() => { const parts = d.dispatch_date.split('T')[0].split('-'); return `${parts[2]}/${parts[1]}/${parts[0]}`; })()} · {pkg?.name || 'Pacote removido'}
+                                  {fmtDate(d.dispatch_date)} · {pkg?.name || 'Pacote removido'}
                                 </p>
                               </div>
                               <div className="flex gap-1">
                                 <button onClick={() => openResultForm(d.id)} className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-purple-500" title="Resultados">
                                   <BarChart3 className="h-3.5 w-3.5" />
                                 </button>
-                                <button onClick={() => { setDispEditId(d.id); setDispForm({ packageId: String(d.package_id), name: d.name, dispatchDate: d.dispatch_date.split('T')[0], sentMessages: String(d.sent_messages), deliveredMessages: String(d.delivered_messages), redirectionCost: d.redirection_cost ? String(d.redirection_cost) : '', notes: d.notes || '', contactFileUrl: d.contact_file_url || '', contactFileName: d.contact_file_name || '', contactCount: d.contact_count ? String(d.contact_count) : '', redirectNumbers: (d.redirect_numbers || []).join('\n') }); setDispFile(null); setDispOpen(true); }}
+                                <button onClick={() => { setDispEditId(d.id); setDispForm({ packageId: String(d.package_id), name: d.name, dispatchDate: toLocalDate(d.dispatch_date), sentMessages: String(d.sent_messages), deliveredMessages: String(d.delivered_messages), readMessages: d.read_messages ? String(d.read_messages) : '', repliedMessages: d.replied_messages ? String(d.replied_messages) : '', clickedMessages: d.clicked_messages ? String(d.clicked_messages) : '', redirectionCost: d.redirection_cost ? String(d.redirection_cost) : '', notes: d.notes || '', contactFileUrl: d.contact_file_url || '', contactFileName: d.contact_file_name || '', contactCount: d.contact_count ? String(d.contact_count) : '', redirectNumbers: (d.redirect_numbers || []).join('\n') }); setDispFile(null); setDispOpen(true); }}
                                   className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
                                   <Pencil className="h-3.5 w-3.5" />
                                 </button>
@@ -536,6 +565,13 @@ export default function ClientDetailPage() {
                               <div><span className="text-slate-500 dark:text-white/40">Entregues</span><p className="font-semibold text-slate-900 dark:text-white">{fmtN(d.delivered_messages)}</p></div>
                               <div><span className="text-slate-500 dark:text-white/40">Taxa</span><p className="font-semibold text-emerald-600">{rate}%</p></div>
                             </div>
+                            {(d.read_messages > 0 || d.replied_messages > 0 || d.clicked_messages > 0) && (
+                              <div className="grid grid-cols-3 gap-3 mt-2 text-xs">
+                                <div><span className="text-slate-500 dark:text-white/40">Lidas</span><p className="font-semibold text-blue-500">{fmtN(d.read_messages || 0)}</p></div>
+                                <div><span className="text-slate-500 dark:text-white/40">Respondidas</span><p className="font-semibold text-cyan-500">{fmtN(d.replied_messages || 0)}</p></div>
+                                <div><span className="text-slate-500 dark:text-white/40">Cliques</span><p className="font-semibold text-teal-500">{fmtN(d.clicked_messages || 0)}</p></div>
+                              </div>
+                            )}
                             {/* Contact info */}
                             {(d.contact_file_name || d.contact_count || (d.redirect_numbers && d.redirect_numbers.length > 0)) && (
                               <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-slate-100 dark:border-white/[0.06] text-xs">
@@ -585,6 +621,8 @@ export default function ClientDetailPage() {
                           <RechartsTooltip contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: 12, fontSize: 12 }} />
                           <Legend wrapperStyle={{ fontSize: 12 }} />
                           <Bar dataKey="delivered" name="Entregues" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="read" name="Lidas" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="replied" name="Respondidas" fill="#06b6d4" radius={[4, 4, 0, 0]} />
                           <Bar dataKey="leads" name="Leads" fill="#10b981" radius={[4, 4, 0, 0]} />
                           <Bar dataKey="sales" name="Vendas" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -593,6 +631,182 @@ export default function ClientDetailPage() {
                   </Card>
                 )}
                 <p className="text-xs text-slate-500 dark:text-white/40">Clique no ícone de gráfico em cada disparo (aba Disparos) para preencher os resultados.</p>
+              </div>
+            )}
+
+            {/* ═══ TAB: ROI & FUNIL ═══ */}
+            {activeTab === 'roi' && roiMetrics && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Metricas de ROI</h2>
+
+                {/* Funnel visualization */}
+                <Card className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                  <CardContent className="p-5">
+                    <h3 className="text-sm font-semibold text-slate-700 dark:text-white/60 mb-4">Funil de Conversao</h3>
+                    <div className="space-y-2">
+                      {[
+                        { label: 'Enviadas', value: roiMetrics.totalSent, color: 'bg-purple-500', rate: null as number | null },
+                        { label: 'Entregues', value: roiMetrics.totalDelivered, color: 'bg-indigo-500', rate: roiMetrics.deliveryRate },
+                        { label: 'Lidas', value: roiMetrics.totalRead, color: 'bg-blue-500', rate: roiMetrics.readRate },
+                        { label: 'Respondidas', value: roiMetrics.totalReplied, color: 'bg-cyan-500', rate: roiMetrics.replyRate },
+                        { label: 'Cliques', value: roiMetrics.totalClicked, color: 'bg-teal-500', rate: roiMetrics.clickRate },
+                        { label: 'Leads', value: roiMetrics.totalLeads, color: 'bg-emerald-500', rate: roiMetrics.leadConversionRate },
+                        { label: 'Vendas', value: roiMetrics.totalSales, color: 'bg-green-500', rate: roiMetrics.saleConversionRate },
+                      ].map((step, i) => {
+                        const maxVal = roiMetrics.totalSent || 1;
+                        const widthPct = Math.max((step.value / maxVal) * 100, 3);
+                        return (
+                          <div key={i} className="flex items-center gap-3">
+                            <span className="text-xs text-slate-500 dark:text-white/40 w-24 text-right">{step.label}</span>
+                            <div className="flex-1 relative">
+                              <div className={`${step.color} rounded-md h-7 flex items-center px-2 transition-all`} style={{ width: `${widthPct}%` }}>
+                                <span className="text-white text-xs font-semibold whitespace-nowrap">{fmtN(step.value)}</span>
+                              </div>
+                            </div>
+                            {step.rate !== null && (
+                              <span className="text-xs text-slate-400 dark:text-white/30 w-16 text-right">{step.rate.toFixed(1)}%</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* ROI Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { title: 'Total Leads', value: fmtN(roiMetrics.totalLeads), icon: Users, color: 'text-emerald-500' },
+                    { title: 'Total Vendas', value: fmtN(roiMetrics.totalSales), icon: TrendingUp, color: 'text-green-500' },
+                    { title: 'Faturamento', value: fmt(roiMetrics.totalRevenue), icon: DollarSign, color: 'text-yellow-500' },
+                    { title: 'Investimento', value: fmt(roiMetrics.totalInvestment), icon: Wallet, color: 'text-red-500' },
+                    { title: 'ROI', value: `${roiMetrics.roi.toFixed(1)}%`, icon: TrendingUp, color: roiMetrics.roi >= 0 ? 'text-green-500' : 'text-red-500' },
+                    { title: 'Custo por Lead', value: fmt(roiMetrics.costPerLead), icon: Target, color: 'text-blue-500' },
+                    { title: 'Custo por Venda', value: fmt(roiMetrics.costPerSale), icon: DollarSign, color: 'text-indigo-500' },
+                    { title: 'Lead → Venda', value: `${roiMetrics.saleConversionRate.toFixed(1)}%`, icon: BarChart3, color: 'text-purple-500' },
+                  ].map((s, i) => (
+                    <div key={i} className="bg-white dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.06] rounded-2xl p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-[10px] font-medium text-slate-500 dark:text-white/40 uppercase tracking-wider">{s.title}</p>
+                          <p className="text-lg font-bold text-slate-900 dark:text-white mt-1">{s.value}</p>
+                        </div>
+                        <s.icon className={`h-4 w-4 ${s.color}`} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ TAB: TENDENCIAS ═══ */}
+            {activeTab === 'tendencias' && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Historico e Tendencias</h2>
+
+                {monthlyTrends.length > 0 ? (
+                  <>
+                    {/* Monthly messages chart */}
+                    <Card className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                      <CardContent className="p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-white/60 mb-4">Mensagens por Mes</h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={monthlyTrends.map(t => ({ ...t, monthLabel: (() => { const [y, m] = t.month.split('-'); const mNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']; return `${mNames[parseInt(m)-1]}/${y.slice(2)}`; })() }))}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                            <XAxis dataKey="monthLabel" tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" />
+                            <YAxis tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" />
+                            <RechartsTooltip contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: 12, fontSize: 12 }} />
+                            <Legend wrapperStyle={{ fontSize: 12 }} />
+                            <Bar dataKey="sent" name="Enviadas" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="delivered" name="Entregues" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+
+                    {/* Monthly conversions chart */}
+                    <Card className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                      <CardContent className="p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-white/60 mb-4">Conversoes por Mes</h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={monthlyTrends.map(t => ({ ...t, monthLabel: (() => { const [y, m] = t.month.split('-'); const mNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']; return `${mNames[parseInt(m)-1]}/${y.slice(2)}`; })() }))}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                            <XAxis dataKey="monthLabel" tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" />
+                            <YAxis tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" />
+                            <RechartsTooltip contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: 12, fontSize: 12 }} />
+                            <Legend wrapperStyle={{ fontSize: 12 }} />
+                            <Bar dataKey="leads" name="Leads" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="sales" name="Vendas" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+
+                    {/* Monthly revenue chart */}
+                    <Card className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                      <CardContent className="p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-white/60 mb-4">Faturamento por Mes</h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <BarChart data={monthlyTrends.map(t => ({ ...t, monthLabel: (() => { const [y, m] = t.month.split('-'); const mNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']; return `${mNames[parseInt(m)-1]}/${y.slice(2)}`; })() }))}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                            <XAxis dataKey="monthLabel" tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" />
+                            <YAxis tick={{ fontSize: 11 }} stroke="rgba(255,255,255,0.2)" tickFormatter={(v: number) => `R$${(v/1000).toFixed(0)}k`} />
+                            <RechartsTooltip contentStyle={{ backgroundColor: '#1e1b4b', border: 'none', borderRadius: 12, fontSize: 12 }} formatter={(value: number) => [`R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Faturamento']} />
+                            <Bar dataKey="revenue" name="Faturamento" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+
+                    {/* Monthly summary table */}
+                    <Card className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                      <CardContent className="p-5">
+                        <h3 className="text-sm font-semibold text-slate-700 dark:text-white/60 mb-4">Resumo Mensal</h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                                <th className="text-left py-2 px-2 text-slate-500 dark:text-white/40">Mes</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Disparos</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Enviadas</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Entregues</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Taxa</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Leads</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Vendas</th>
+                                <th className="text-right py-2 px-2 text-slate-500 dark:text-white/40">Faturamento</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthlyTrends.map((t: any) => {
+                                const [y, m] = t.month.split('-');
+                                const mNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+                                const label = `${mNames[parseInt(m)-1]}/${y}`;
+                                const rate = t.sent > 0 ? ((t.delivered / t.sent) * 100).toFixed(1) : '0';
+                                return (
+                                  <tr key={t.month} className="border-b border-slate-100 dark:border-white/[0.04]">
+                                    <td className="py-2 px-2 font-medium text-slate-900 dark:text-white">{label}</td>
+                                    <td className="py-2 px-2 text-right text-slate-700 dark:text-white/70">{t.dispatches}</td>
+                                    <td className="py-2 px-2 text-right text-slate-700 dark:text-white/70">{fmtN(t.sent)}</td>
+                                    <td className="py-2 px-2 text-right text-slate-700 dark:text-white/70">{fmtN(t.delivered)}</td>
+                                    <td className="py-2 px-2 text-right text-emerald-600">{rate}%</td>
+                                    <td className="py-2 px-2 text-right text-slate-700 dark:text-white/70">{fmtN(t.leads)}</td>
+                                    <td className="py-2 px-2 text-right text-slate-700 dark:text-white/70">{fmtN(t.sales)}</td>
+                                    <td className="py-2 px-2 text-right font-medium text-slate-900 dark:text-white">{fmt(t.revenue)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </>
+                ) : (
+                  <div className="text-center py-12 text-slate-500 dark:text-white/40">
+                    <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                    <p>Dados insuficientes para exibir tendencias.</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -610,7 +824,10 @@ export default function ClientDetailPage() {
               <div><Label>Msgs Contratadas *</Label><Input type="number" value={pkgForm.contractedMessages} onChange={e => setPkgForm(f => ({ ...f, contractedMessages: e.target.value }))} /></div>
               <div><Label>Preço/Msg (R$) *</Label><Input type="number" step="0.01" value={pkgForm.pricePerMessage} onChange={e => setPkgForm(f => ({ ...f, pricePerMessage: e.target.value }))} /></div>
             </div>
-            <div><Label>Custo Plataforma/Msg (R$)</Label><Input type="number" step="0.01" value={pkgForm.platformCost} onChange={e => setPkgForm(f => ({ ...f, platformCost: e.target.value }))} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Custo Plataforma/Msg (R$)</Label><Input type="number" step="0.01" value={pkgForm.platformCost} onChange={e => setPkgForm(f => ({ ...f, platformCost: e.target.value }))} /></div>
+              <div><Label>Data de Compra</Label><Input type="date" value={pkgForm.purchaseDate} onChange={e => setPkgForm(f => ({ ...f, purchaseDate: e.target.value }))} /></div>
+            </div>
             <div><Label>Observações</Label><Textarea value={pkgForm.notes} onChange={e => setPkgForm(f => ({ ...f, notes: e.target.value }))} rows={2} /></div>
             {revenuePreview && (
               <div className="p-3 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/[0.06] space-y-1 text-xs">
@@ -650,6 +867,15 @@ export default function ClientDetailPage() {
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Msgs Enviadas *</Label><Input type="number" value={dispForm.sentMessages} onChange={e => setDispForm(f => ({ ...f, sentMessages: e.target.value }))} /></div>
               <div><Label>Msgs Entregues *</Label><Input type="number" value={dispForm.deliveredMessages} onChange={e => setDispForm(f => ({ ...f, deliveredMessages: e.target.value }))} /></div>
+            </div>
+            {/* Métricas do Funil */}
+            <div className="p-3 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/[0.06] space-y-3">
+              <p className="text-xs font-semibold text-slate-700 dark:text-white/60 flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" /> Metricas do Funil (opcional)</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label>Lidas</Label><Input type="number" value={dispForm.readMessages} onChange={e => setDispForm(f => ({ ...f, readMessages: e.target.value }))} placeholder="0" /></div>
+                <div><Label>Respondidas</Label><Input type="number" value={dispForm.repliedMessages} onChange={e => setDispForm(f => ({ ...f, repliedMessages: e.target.value }))} placeholder="0" /></div>
+                <div><Label>Cliques</Label><Input type="number" value={dispForm.clickedMessages} onChange={e => setDispForm(f => ({ ...f, clickedMessages: e.target.value }))} placeholder="0" /></div>
+              </div>
             </div>
             <div><Label>Custo Redirecionamento (R$)</Label><Input type="number" step="0.01" value={dispForm.redirectionCost} onChange={e => setDispForm(f => ({ ...f, redirectionCost: e.target.value }))} /></div>
 

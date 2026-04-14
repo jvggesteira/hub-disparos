@@ -47,7 +47,7 @@ export default function LoginPage() {
           providers={[]}
           redirectTo={redirectUrl}
           view="sign_in"
-          showLinks={true}
+          showLinks={false}
           localization={{
             variables: {
               sign_in: {

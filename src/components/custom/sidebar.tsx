@@ -7,12 +7,13 @@ import { useAuth } from '@/hooks/use-auth';
 import { getInitials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight, Send
+  ChevronLeft, ChevronRight, Send, FileText
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
+  { name: 'Relatorios', href: '/relatorios', icon: FileText },
 ];
 
 export function Sidebar() {

@@ -7,11 +7,11 @@ import React, { useEffect, useState } from 'react';
 // 1. LISTA ATUALIZADA (Incluindo a raiz '/')
 const PUBLIC_ROUTES = [
   '/login',
-  '/signup',
   '/forgot-password',
   '/verify',
   '/update-password',
   '/auth/callback',
+  '/acompanhamento',
 ];
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -31,7 +31,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     if (isPublicRoute) {
         setIsChecking(false);
 
-        if (isAuthenticated && (pathname === '/login' || pathname === '/signup')) {
+        if (isAuthenticated && pathname === '/login') {
             router.replace('/');
         }
     } else {

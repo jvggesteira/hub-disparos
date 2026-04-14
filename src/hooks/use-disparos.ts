@@ -5,19 +5,22 @@ import { supabase } from '@/lib/supabase';
 export type DisparoClient = {
   id: number; name: string; company: string | null; email: string | null;
   phone: string | null; notes: string | null; is_active: boolean;
-  status: 'ativo' | 'pausado' | 'encerrado'; created_at: string; updated_at: string;
+  status: 'ativo' | 'pausado' | 'encerrado'; segment: string | null;
+  created_at: string; updated_at: string;
 };
 
 export type DisparoPackage = {
   id: number; client_id: number; name: string; contracted_messages: number;
   price_per_message: number; platform_cost_per_message: number; notes: string | null;
   is_active: boolean; refunded_messages: number; refunded_at: string | null;
+  purchase_date: string | null;
   created_at: string; updated_at: string;
 };
 
 export type DisparoDispatch = {
   id: number; package_id: number; client_id: number; name: string;
   dispatch_date: string; sent_messages: number; delivered_messages: number;
+  read_messages: number; replied_messages: number; clicked_messages: number;
   redirection_cost: number | null; notes: string | null;
   contact_file_url: string | null; contact_file_name: string | null;
   contact_count: number | null; redirect_numbers: string[];
@@ -28,6 +31,12 @@ export type DisparoResult = {
   id: number; dispatch_id: number; leads_count: number | null;
   sales_count: number | null; revenue: number | null; notes: string | null;
   created_at: string; updated_at: string;
+};
+
+export type DisparoActivityLog = {
+  id: number; user_email: string; action: string; entity_type: string;
+  entity_id: number; entity_name: string | null; details: Record<string, any>;
+  created_at: string;
 };
 
 // ─── Clients ───────────────────────────────────────────────────────────────────
@@ -46,10 +55,11 @@ export async function getDisparoClientById(id: number) {
   return data as DisparoClient;
 }
 
-export async function createDisparoClient(input: { name: string; company?: string; email?: string; phone?: string; notes?: string; status?: string }) {
+export async function createDisparoClient(input: { name: string; company?: string; email?: string; phone?: string; notes?: string; status?: string; segment?: string }) {
   const { error } = await supabase.from('disparo_clients').insert({
     name: input.name, company: input.company || null, email: input.email || null,
     phone: input.phone || null, notes: input.notes || null, status: input.status || 'ativo',
+    segment: input.segment || null,
   });
   if (error) throw error;
 }
@@ -72,11 +82,11 @@ export async function getPackagesByClient(clientId: number) {
   return (data || []) as DisparoPackage[];
 }
 
-export async function createPackage(input: { client_id: number; name: string; contracted_messages: number; price_per_message: number; platform_cost_per_message?: number; notes?: string }) {
+export async function createPackage(input: { client_id: number; name: string; contracted_messages: number; price_per_message: number; platform_cost_per_message?: number; notes?: string; purchase_date?: string }) {
   const { error } = await supabase.from('disparo_packages').insert({
     client_id: input.client_id, name: input.name, contracted_messages: input.contracted_messages,
     price_per_message: input.price_per_message, platform_cost_per_message: input.platform_cost_per_message ?? 0.2,
-    notes: input.notes || null,
+    notes: input.notes || null, purchase_date: input.purchase_date ? `${input.purchase_date}T12:00:00` : null,
   });
   if (error) throw error;
 }
@@ -162,11 +172,13 @@ export async function createDispatch(input: {
   package_id: number; client_id: number; name: string; dispatch_date: string;
   sent_messages: number; delivered_messages: number; redirection_cost?: number; notes?: string;
   contact_file_url?: string; contact_file_name?: string; contact_count?: number; redirect_numbers?: string[];
+  read_messages?: number; replied_messages?: number; clicked_messages?: number;
 }) {
   const { error } = await supabase.from('disparo_dispatches').insert({
     package_id: input.package_id, client_id: input.client_id, name: input.name,
-    dispatch_date: input.dispatch_date, sent_messages: input.sent_messages,
+    dispatch_date: input.dispatch_date.includes('T') ? input.dispatch_date : `${input.dispatch_date}T12:00:00`, sent_messages: input.sent_messages,
     delivered_messages: input.delivered_messages,
+    read_messages: input.read_messages ?? 0, replied_messages: input.replied_messages ?? 0, clicked_messages: input.clicked_messages ?? 0,
     redirection_cost: input.redirection_cost ?? null, notes: input.notes || null,
     contact_file_url: input.contact_file_url || null, contact_file_name: input.contact_file_name || null,
     contact_count: input.contact_count ?? null, redirect_numbers: input.redirect_numbers || [],
@@ -175,7 +187,11 @@ export async function createDispatch(input: {
 }
 
 export async function updateDispatch(id: number, input: Partial<DisparoDispatch>) {
-  const { error } = await supabase.from('disparo_dispatches').update(input).eq('id', id);
+  const data = { ...input };
+  if (data.dispatch_date && !data.dispatch_date.includes('T')) {
+    data.dispatch_date = `${data.dispatch_date}T12:00:00`;
+  }
+  const { error } = await supabase.from('disparo_dispatches').update(data).eq('id', id);
   if (error) throw error;
 }
 
@@ -371,4 +387,211 @@ export async function getDispatchResultsForChart(clientId: number) {
     });
   }
   return rows;
+}
+
+// ─── Activity Logs ──────────────────────────────────────────────────────────────
+
+export async function logActivity(input: { user_email: string; action: string; entity_type: string; entity_id: number; entity_name?: string; details?: Record<string, any> }) {
+  await supabase.from('disparo_activity_logs').insert({
+    user_email: input.user_email, action: input.action, entity_type: input.entity_type,
+    entity_id: input.entity_id, entity_name: input.entity_name || null,
+    details: input.details || {},
+  });
+}
+
+export async function getActivityLogs(opts?: { entity_type?: string; entity_id?: number; limit?: number }) {
+  let query = supabase.from('disparo_activity_logs').select('*').order('created_at', { ascending: false });
+  if (opts?.entity_type) query = query.eq('entity_type', opts.entity_type);
+  if (opts?.entity_id) query = query.eq('entity_id', opts.entity_id);
+  query = query.limit(opts?.limit || 50);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []) as DisparoActivityLog[];
+}
+
+// ─── ROI & Analytics ────────────────────────────────────────────────────────────
+
+export async function getClientROIMetrics(clientId: number) {
+  const { data: pkgs } = await supabase.from('disparo_packages').select('*').eq('client_id', clientId).eq('is_active', true);
+  const { data: disps } = await supabase.from('disparo_dispatches').select('*').eq('client_id', clientId);
+
+  const allPkgs = pkgs || [];
+  const allDisps = disps || [];
+
+  // Get all results for this client's dispatches
+  let totalLeads = 0, totalSales = 0, totalRevenue = 0;
+  let totalInvestment = 0;
+  let totalRead = 0, totalReplied = 0, totalClicked = 0;
+  let totalSent = 0, totalDelivered = 0;
+
+  for (const d of allDisps) {
+    const result = await getResultByDispatch(d.id);
+    totalLeads += result?.leads_count || 0;
+    totalSales += result?.sales_count || 0;
+    totalRevenue += Number(result?.revenue || 0);
+    totalRead += d.read_messages || 0;
+    totalReplied += d.replied_messages || 0;
+    totalClicked += d.clicked_messages || 0;
+    totalSent += d.sent_messages;
+    totalDelivered += d.delivered_messages;
+  }
+
+  for (const pkg of allPkgs) {
+    const refunded = pkg.refunded_messages || 0;
+    const billable = pkg.contracted_messages - refunded;
+    totalInvestment += Number(pkg.price_per_message) * billable;
+  }
+
+  const costPerLead = totalLeads > 0 ? totalInvestment / totalLeads : 0;
+  const costPerSale = totalSales > 0 ? totalInvestment / totalSales : 0;
+  const roi = totalInvestment > 0 ? ((totalRevenue - totalInvestment) / totalInvestment) * 100 : 0;
+
+  return {
+    totalLeads, totalSales, totalRevenue, totalInvestment,
+    costPerLead, costPerSale, roi,
+    totalSent, totalDelivered, totalRead, totalReplied, totalClicked,
+    deliveryRate: totalSent > 0 ? (totalDelivered / totalSent) * 100 : 0,
+    readRate: totalDelivered > 0 ? (totalRead / totalDelivered) * 100 : 0,
+    replyRate: totalDelivered > 0 ? (totalReplied / totalDelivered) * 100 : 0,
+    clickRate: totalDelivered > 0 ? (totalClicked / totalDelivered) * 100 : 0,
+    leadConversionRate: totalDelivered > 0 ? (totalLeads / totalDelivered) * 100 : 0,
+    saleConversionRate: totalLeads > 0 ? (totalSales / totalLeads) * 100 : 0,
+  };
+}
+
+export async function getClientMonthlyTrends(clientId: number) {
+  const { data: disps } = await supabase.from('disparo_dispatches').select('*').eq('client_id', clientId).order('dispatch_date');
+  const months: Record<string, { month: string; sent: number; delivered: number; read: number; replied: number; clicked: number; leads: number; sales: number; revenue: number; dispatches: number }> = {};
+
+  for (const d of disps || []) {
+    const monthKey = d.dispatch_date.substring(0, 7); // YYYY-MM
+    if (!months[monthKey]) {
+      months[monthKey] = { month: monthKey, sent: 0, delivered: 0, read: 0, replied: 0, clicked: 0, leads: 0, sales: 0, revenue: 0, dispatches: 0 };
+    }
+    months[monthKey].sent += d.sent_messages;
+    months[monthKey].delivered += d.delivered_messages;
+    months[monthKey].read += d.read_messages || 0;
+    months[monthKey].replied += d.replied_messages || 0;
+    months[monthKey].clicked += d.clicked_messages || 0;
+    months[monthKey].dispatches += 1;
+
+    const result = await getResultByDispatch(d.id);
+    months[monthKey].leads += result?.leads_count || 0;
+    months[monthKey].sales += result?.sales_count || 0;
+    months[monthKey].revenue += Number(result?.revenue || 0);
+  }
+
+  return Object.values(months).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+export async function getSLAAlerts() {
+  const { data: pkgs } = await supabase.from('disparo_packages').select('*, disparo_clients(name, company)').eq('is_active', true);
+  const alerts: Array<{ type: string; clientName: string; clientId: number; packageName: string; packageId: number; message: string; severity: 'warning' | 'danger'; daysSince: number }> = [];
+
+  for (const pkg of pkgs || []) {
+    const { data: disps } = await supabase.from('disparo_dispatches').select('dispatch_date').eq('package_id', pkg.id).order('dispatch_date', { ascending: false }).limit(1);
+
+    const lastDispatch = disps?.[0];
+    const clientInfo = (pkg as any).disparo_clients;
+
+    if (!lastDispatch) {
+      // Package with no dispatches
+      const daysSinceCreation = Math.floor((Date.now() - new Date(pkg.created_at).getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceCreation > 3) {
+        alerts.push({
+          type: 'no_dispatch', clientName: clientInfo?.name || 'N/A', clientId: pkg.client_id,
+          packageName: pkg.name, packageId: pkg.id,
+          message: `Pacote criado há ${daysSinceCreation} dias sem nenhum disparo`,
+          severity: daysSinceCreation > 7 ? 'danger' : 'warning', daysSince: daysSinceCreation,
+        });
+      }
+    } else {
+      const daysSinceLast = Math.floor((Date.now() - new Date(lastDispatch.dispatch_date).getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceLast > 5) {
+        alerts.push({
+          type: 'inactive_package', clientName: clientInfo?.name || 'N/A', clientId: pkg.client_id,
+          packageName: pkg.name, packageId: pkg.id,
+          message: `Último disparo há ${daysSinceLast} dias`,
+          severity: daysSinceLast > 10 ? 'danger' : 'warning', daysSince: daysSinceLast,
+        });
+      }
+    }
+  }
+
+  return alerts.sort((a, b) => b.daysSince - a.daysSince);
+}
+
+// ─── Enhanced Charts & Portal ───────────────────────────────────────────────────
+
+export async function getDispatchResultsForChartEnhanced(clientId: number) {
+  const { data: disps } = await supabase.from('disparo_dispatches').select('*').eq('client_id', clientId).order('dispatch_date');
+  const rows = [];
+  for (const d of disps || []) {
+    const result = await getResultByDispatch(d.id);
+    rows.push({
+      dispatchId: d.id, name: d.name, date: d.dispatch_date,
+      sent: d.sent_messages, delivered: d.delivered_messages,
+      read: d.read_messages || 0, replied: d.replied_messages || 0, clicked: d.clicked_messages || 0,
+      leads: result?.leads_count || 0, sales: result?.sales_count || 0,
+      revenue: Number(result?.revenue || 0),
+    });
+  }
+  return rows;
+}
+
+export async function getClientPortalData(clientId: number) {
+  const { data: client } = await supabase.from('disparo_clients').select('id, name, company').eq('id', clientId).single();
+  if (!client) return null;
+
+  const { data: pkgs } = await supabase.from('disparo_packages').select('id, name, contracted_messages, is_active, refunded_messages, created_at').eq('client_id', clientId).eq('is_active', true);
+  const { data: disps } = await supabase.from('disparo_dispatches').select('*').eq('client_id', clientId).order('dispatch_date', { ascending: false });
+
+  let totalContracted = 0, totalDelivered = 0, totalSent = 0;
+  let totalRead = 0, totalReplied = 0, totalClicked = 0;
+  let totalLeads = 0, totalSales = 0, totalRevenue = 0;
+
+  for (const pkg of pkgs || []) {
+    const refunded = pkg.refunded_messages || 0;
+    totalContracted += pkg.contracted_messages - refunded;
+  }
+
+  const dispatchDetails = [];
+  for (const d of disps || []) {
+    totalSent += d.sent_messages;
+    totalDelivered += d.delivered_messages;
+    totalRead += d.read_messages || 0;
+    totalReplied += d.replied_messages || 0;
+    totalClicked += d.clicked_messages || 0;
+
+    const result = await getResultByDispatch(d.id);
+    const leads = result?.leads_count || 0;
+    const sales = result?.sales_count || 0;
+    const revenue = Number(result?.revenue || 0);
+    totalLeads += leads;
+    totalSales += sales;
+    totalRevenue += revenue;
+
+    dispatchDetails.push({
+      id: d.id, name: d.name, date: d.dispatch_date,
+      sent: d.sent_messages, delivered: d.delivered_messages,
+      read: d.read_messages || 0, replied: d.replied_messages || 0,
+      clicked: d.clicked_messages || 0,
+      leads, sales, revenue,
+    });
+  }
+
+  return {
+    client: { id: client.id, name: client.name, company: client.company },
+    packages: (pkgs || []).map(p => ({ id: p.id, name: p.name, contracted: p.contracted_messages - (p.refunded_messages || 0) })),
+    summary: {
+      totalContracted, totalSent, totalDelivered, totalBalance: totalContracted - totalDelivered,
+      totalRead, totalReplied, totalClicked,
+      totalLeads, totalSales, totalRevenue,
+      deliveryRate: totalSent > 0 ? (totalDelivered / totalSent) * 100 : 0,
+      readRate: totalDelivered > 0 ? (totalRead / totalDelivered) * 100 : 0,
+      replyRate: totalDelivered > 0 ? (totalReplied / totalDelivered) * 100 : 0,
+      clickRate: totalDelivered > 0 ? (totalClicked / totalDelivered) * 100 : 0,
+    },
+    dispatches: dispatchDetails,
+  };
 }
