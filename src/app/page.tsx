@@ -226,7 +226,7 @@ export default function DisparosPage() {
 
   // UI state
   const [alertOpen, setAlertOpen] = useState(true);
-  const [slaAlerts, setSlaAlerts] = useState<Array<{ type: string; clientName: string; clientId: number; packageName: string; packageId: number; message: string; severity: 'warning' | 'danger'; daysSince: number }>>([]);
+  const [slaAlerts, setSlaAlerts] = useState<Array<{ type: string; clientName: string; clientId: number; message: string; severity: 'warning' | 'danger'; totalBalance: number }>>([]);
   const [slaAlertOpen, setSlaAlertOpen] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'todos' | ClientStatus>('todos');
   const [overviewSearch, setOverviewSearch] = useState('');
@@ -478,7 +478,7 @@ export default function DisparosPage() {
                       Alertas de SLA ({slaAlerts.length})
                     </p>
                     <p className="text-xs text-orange-700 dark:text-orange-400/70 mt-0.5">
-                      Pacotes que precisam de atenção:
+                      Clientes com saldo baixo:
                     </p>
                     <div className="flex flex-wrap gap-2 mt-2">
                       {slaAlerts.map((a, i) => (
@@ -488,7 +488,7 @@ export default function DisparosPage() {
                               ? 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-300 hover:bg-red-200'
                               : 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-300 hover:bg-orange-200'
                           }`}>
-                          {a.clientName} - {a.packageName}
+                          {a.clientName}
                           <span className="opacity-60">({a.message})</span>
                         </button>
                       ))}

@@ -485,40 +485,37 @@ export async function getClientMonthlyTrends(clientId: number) {
 }
 
 export async function getSLAAlerts() {
-  const { data: pkgs } = await supabase.from('disparo_packages').select('*, disparo_clients(name, company)').eq('is_active', true);
-  const alerts: Array<{ type: string; clientName: string; clientId: number; packageName: string; packageId: number; message: string; severity: 'warning' | 'danger'; daysSince: number }> = [];
+  const { data: clients } = await supabase.from('disparo_clients').select('id, name, company').eq('is_active', true);
+  const alerts: Array<{ type: string; clientName: string; clientId: number; message: string; severity: 'warning' | 'danger'; totalBalance: number }> = [];
 
-  for (const pkg of pkgs || []) {
-    const { data: disps } = await supabase.from('disparo_dispatches').select('dispatch_date').eq('package_id', pkg.id).order('dispatch_date', { ascending: false }).limit(1);
+  for (const client of clients || []) {
+    const { data: pkgs } = await supabase.from('disparo_packages').select('id, contracted_messages, refunded_messages').eq('client_id', client.id).eq('is_active', true);
+    if (!pkgs || pkgs.length === 0) continue;
 
-    const lastDispatch = disps?.[0];
-    const clientInfo = (pkg as any).disparo_clients;
+    const { data: disps } = await supabase.from('disparo_dispatches').select('delivered_messages, package_id').eq('client_id', client.id);
 
-    if (!lastDispatch) {
-      // Package with no dispatches
-      const daysSinceCreation = Math.floor((Date.now() - new Date(pkg.created_at).getTime()) / (1000 * 60 * 60 * 24));
-      if (daysSinceCreation > 3) {
-        alerts.push({
-          type: 'no_dispatch', clientName: clientInfo?.name || 'N/A', clientId: pkg.client_id,
-          packageName: pkg.name, packageId: pkg.id,
-          message: `Pacote criado há ${daysSinceCreation} dias sem nenhum disparo`,
-          severity: daysSinceCreation > 7 ? 'danger' : 'warning', daysSince: daysSinceCreation,
-        });
-      }
-    } else {
-      const daysSinceLast = Math.floor((Date.now() - new Date(lastDispatch.dispatch_date).getTime()) / (1000 * 60 * 60 * 24));
-      if (daysSinceLast > 5) {
-        alerts.push({
-          type: 'inactive_package', clientName: clientInfo?.name || 'N/A', clientId: pkg.client_id,
-          packageName: pkg.name, packageId: pkg.id,
-          message: `Último disparo há ${daysSinceLast} dias`,
-          severity: daysSinceLast > 10 ? 'danger' : 'warning', daysSince: daysSinceLast,
-        });
-      }
+    let totalContracted = 0;
+    for (const pkg of pkgs) {
+      const refunded = pkg.refunded_messages || 0;
+      totalContracted += pkg.contracted_messages - refunded;
+    }
+    const totalDelivered = (disps || []).reduce((s: number, d: any) => s + d.delivered_messages, 0);
+    const totalBalance = totalContracted - totalDelivered;
+
+    if (totalContracted > 0 && totalBalance < 5000) {
+      const pct = ((totalBalance / totalContracted) * 100).toFixed(0);
+      alerts.push({
+        type: 'low_balance', clientName: client.name, clientId: client.id,
+        message: totalBalance <= 0
+          ? `Saldo esgotado (${new Intl.NumberFormat('pt-BR').format(totalBalance)} msgs)`
+          : `Saldo baixo: ${new Intl.NumberFormat('pt-BR').format(totalBalance)} msgs (${pct}%)`,
+        severity: totalBalance <= 1000 ? 'danger' : 'warning',
+        totalBalance,
+      });
     }
   }
 
-  return alerts.sort((a, b) => b.daysSince - a.daysSince);
+  return alerts.sort((a, b) => a.totalBalance - b.totalBalance);
 }
 
 // ─── Enhanced Charts & Portal ───────────────────────────────────────────────────
