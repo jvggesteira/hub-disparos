@@ -4,12 +4,12 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/custom/sidebar';
 import { Header } from '@/components/custom/header';
-import { getDisparoClients, createDisparoClient, updateDisparoClient, deleteDisparoClient } from '@/hooks/use-disparos';
+import { getDisparoClients, createDisparoClient, updateDisparoClient, deleteDisparoClient, getAllClientsStats } from '@/hooks/use-disparos';
 import type { DisparoClient } from '@/hooks/use-disparos';
 import { useToast } from '@/hooks/use-toast';
 import {
   Users, Plus, Search, ArrowRight, Building2, Mail, Phone,
-  Trash2, Pencil, Loader2
+  Trash2, Pencil, Loader2, Package, Send, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,12 +75,14 @@ export default function DisparoClientesPage() {
   const [form, setForm] = useState<ClientForm>({ ...emptyForm });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [clientStats, setClientStats] = useState<Record<number, { totalContracted: number; totalDelivered: number; totalBalance: number; totalDispatches: number }>>({});
 
   // ---------- Fetch ----------
   const fetchClients = async () => {
     setIsLoading(true);
     const data = await getDisparoClients();
     setClients(data);
+    try { const s = await getAllClientsStats(); setClientStats(s); } catch {}
     setIsLoading(false);
   };
 
@@ -145,7 +147,7 @@ export default function DisparoClientesPage() {
       await updateDisparoClient(editId, {
         name: form.name.trim(), company: form.company.trim(), email: form.email.trim(),
         phone: form.phone.trim(), notes: form.notes.trim(), status: form.status,
-      });
+      } as any);
       toast({ title: 'Cliente atualizado!', className: 'bg-green-600 text-white border-none' });
       setEditOpen(false); setEditId(null); setForm({ ...emptyForm });
       fetchClients();
@@ -371,6 +373,26 @@ export default function DisparoClientesPage() {
                         </p>
                       )}
                     </div>
+
+                    {/* Stats preview */}
+                    {clientStats[client.id] && (
+                      <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-lg p-2 text-center">
+                          <p className="text-slate-400 dark:text-white/40">Saldo</p>
+                          <p className={`font-bold ${clientStats[client.id].totalBalance < 5000 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {new Intl.NumberFormat('pt-BR').format(clientStats[client.id].totalBalance)}
+                          </p>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-lg p-2 text-center">
+                          <p className="text-slate-400 dark:text-white/40">Disparos</p>
+                          <p className="font-bold text-purple-500">{clientStats[client.id].totalDispatches}</p>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-lg p-2 text-center">
+                          <p className="text-slate-400 dark:text-white/40">Contratadas</p>
+                          <p className="font-bold text-slate-900 dark:text-white">{new Intl.NumberFormat('pt-BR').format(clientStats[client.id].totalContracted)}</p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Footer */}
                     <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-white/[0.06]">

@@ -1,5 +1,8 @@
 node_modules/
 .next/
+.env
 .env.local
 .DS_Store
 .vercel
+supabase/.temp/
+tsconfig.tsbuildinfo

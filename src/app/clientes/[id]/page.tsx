@@ -26,8 +26,9 @@ import {
   deletePackage, refundPackageMessages, createDispatch, updateDispatch, deleteDispatch,
   getResultByDispatch, upsertDispatchResult, getDispatchResultsForChartEnhanced,
   uploadDispatchFile, getClientROIMetrics, getClientMonthlyTrends,
+  getClientRefunds, getClientRefundTotals, createClientRefund, deleteClientRefund,
 } from '@/hooks/use-disparos';
-import type { DisparoClient, DisparoPackage, DisparoDispatch, DisparoResult } from '@/hooks/use-disparos';
+import type { DisparoClient, DisparoPackage, DisparoDispatch, DisparoResult, DisparoClientRefund } from '@/hooks/use-disparos';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   Legend, ResponsiveContainer,
@@ -93,7 +94,7 @@ export default function ClientDetailPage() {
   const [stats, setStats] = useState<any>(null);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pacotes' | 'disparos' | 'resultados' | 'roi' | 'tendencias'>('pacotes');
+  const [activeTab, setActiveTab] = useState<'pacotes' | 'disparos' | 'resultados' | 'estornos' | 'roi' | 'tendencias'>('pacotes');
   const [roiMetrics, setRoiMetrics] = useState<any>(null);
   const [monthlyTrends, setMonthlyTrends] = useState<any[]>([]);
 
@@ -105,9 +106,22 @@ export default function ClientDetailPage() {
   const [pkgSaving, setPkgSaving] = useState(false);
   const [pkgBalances, setPkgBalances] = useState<Record<number, any>>({});
 
-  // Refund
+  // Refund (package level)
   const [refundPkgId, setRefundPkgId] = useState<number | null>(null);
   const [refundAmount, setRefundAmount] = useState('');
+
+  // Refund (client level)
+  const [clientRefundOpen, setClientRefundOpen] = useState(false);
+  const [clientRefundAmount, setClientRefundAmount] = useState('');
+  const [clientRefundReason, setClientRefundReason] = useState('');
+  const [clientRefundSaving, setClientRefundSaving] = useState(false);
+  const [clientRefunds, setClientRefunds] = useState<DisparoClientRefund[]>([]);
+  const [clientRefundTotals, setClientRefundTotals] = useState<{ totalRefundedMessages: number; totalRefundGross: number; totalRefundPlatform: number; totalRefundCompany: number; totalRefundPartner: number }>({ totalRefundedMessages: 0, totalRefundGross: 0, totalRefundPlatform: 0, totalRefundCompany: 0, totalRefundPartner: 0 });
+  const [deleteRefundId, setDeleteRefundId] = useState<number | null>(null);
+  const [refundMode, setRefundMode] = useState<'package' | 'manual'>('manual');
+  const [refundSelectedPkgId, setRefundSelectedPkgId] = useState<string>('');
+  const [refundManualPrice, setRefundManualPrice] = useState('');
+  const [refundManualPlatform, setRefundManualPlatform] = useState('0.20');
 
   // Dispatch form
   const [dispOpen, setDispOpen] = useState(false);
@@ -131,6 +145,7 @@ export default function ClientDetailPage() {
 
   async function loadData() {
     try {
+      // Core data - must succeed
       const [c, p, s, d, chart, roi, trends] = await Promise.all([
         getDisparoClientById(clientId), getPackagesByClient(clientId),
         getClientStats(clientId), getDispatchesByClient(clientId),
@@ -140,6 +155,16 @@ export default function ClientDetailPage() {
       ]);
       setClient(c); setPackages(p.filter(pk => pk.is_active)); setStats(s); setDispatches(d); setChartData(chart);
       setRoiMetrics(roi); setMonthlyTrends(trends);
+
+      // Refunds - fail gracefully if table not yet available
+      try {
+        const [refunds, refTotals] = await Promise.all([
+          getClientRefunds(clientId),
+          getClientRefundTotals(clientId),
+        ]);
+        setClientRefunds(refunds); setClientRefundTotals(refTotals);
+      } catch { /* table may not exist yet */ }
+
       // Load balances
       const bals: Record<number, any> = {};
       for (const pk of p.filter(pk => pk.is_active)) {
@@ -214,6 +239,75 @@ export default function ClientDetailPage() {
       toast({ title: 'Estorno aplicado!', className: 'bg-green-600 text-white border-none' });
       setRefundPkgId(null); setRefundAmount(''); loadData();
     } catch (err: any) { toast({ title: 'Erro', description: err.message, variant: 'destructive' }); }
+  }
+
+  // ─── Client Refund Handlers ─────────────────────────────────────────────────
+
+  const clientRefundPreview = useMemo(() => {
+    if (!client || !clientRefundAmount) return null;
+    const msgs = parseInt(clientRefundAmount) || 0;
+    if (msgs <= 0) return null;
+    let price = 0;
+    let platform = 0;
+    if (refundMode === 'package') {
+      const pkg = packages.find(p => String(p.id) === refundSelectedPkgId);
+      if (!pkg) return null;
+      price = Number(pkg.price_per_message);
+      platform = Number(pkg.platform_cost_per_message);
+    } else {
+      price = parseFloat(refundManualPrice) || 0;
+      platform = parseFloat(refundManualPlatform) || 0;
+      if (price <= 0) return null;
+    }
+    const gross = price * msgs;
+    const platformTotal = platform * msgs;
+    const net = (price - platform) * msgs;
+    return { msgs, price, platform, gross, platformTotal, net, company: net / 2, partner: net / 2 };
+  }, [clientRefundAmount, packages, client, refundMode, refundSelectedPkgId, refundManualPrice, refundManualPlatform]);
+
+  async function handleClientRefund() {
+    if (!client || !clientRefundAmount) return;
+    const msgs = parseInt(clientRefundAmount);
+    if (!msgs || msgs <= 0) return;
+    setClientRefundSaving(true);
+    try {
+      let price = 0;
+      let platform = 0;
+      if (refundMode === 'package') {
+        const pkg = packages.find(p => String(p.id) === refundSelectedPkgId);
+        if (!pkg) throw new Error('Selecione um pacote');
+        price = Number(pkg.price_per_message);
+        platform = Number(pkg.platform_cost_per_message);
+      } else {
+        price = parseFloat(refundManualPrice) || 0;
+        platform = parseFloat(refundManualPlatform) || 0;
+        if (price <= 0) throw new Error('Informe o valor por mensagem');
+      }
+      await createClientRefund({
+        client_id: clientId, refunded_messages: msgs,
+        price_per_message: price, platform_cost_per_message: platform,
+        reason: clientRefundReason || undefined,
+      });
+      toast({ title: 'Estorno aplicado!', description: `${fmtN(msgs)} mensagens estornadas do cliente.`, className: 'bg-green-600 text-white border-none' });
+      setClientRefundOpen(false); setClientRefundAmount(''); setClientRefundReason('');
+      setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20');
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erro no estorno', description: err.message, variant: 'destructive' });
+    }
+    setClientRefundSaving(false);
+  }
+
+  async function handleDeleteClientRefund() {
+    if (!deleteRefundId) return;
+    try {
+      await deleteClientRefund(deleteRefundId);
+      toast({ title: 'Estorno removido', className: 'bg-green-600 text-white border-none' });
+      setDeleteRefundId(null);
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
+    }
   }
 
   // ─── Dispatch Handlers ───────────────────────────────────────────────────────
@@ -377,8 +471,23 @@ export default function ClientDetailPage() {
                   </span>
                 </div>
                 {client.company && <p className="text-sm text-slate-500 dark:text-white/40">{client.company}</p>}
+                {clientRefundTotals.totalRefundedMessages > 0 && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-yellow-50 dark:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+                      {fmtN(clientRefundTotals.totalRefundedMessages)} msgs estornadas
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl gap-2 text-xs border-yellow-300 dark:border-yellow-500/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10"
+                  onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setClientRefundOpen(true); }}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Estornar
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -433,6 +542,7 @@ export default function ClientDetailPage() {
               {([
                 { key: 'pacotes', label: 'Pacotes' },
                 { key: 'disparos', label: 'Disparos' },
+                { key: 'estornos', label: `Estornos${clientRefundTotals.totalRefundedMessages > 0 ? ` (${clientRefunds.length})` : ''}` },
                 { key: 'resultados', label: 'Resultados' },
                 { key: 'roi', label: 'ROI & Funil' },
                 { key: 'tendencias', label: 'Tendencias' },
@@ -631,6 +741,74 @@ export default function ClientDetailPage() {
                   </Card>
                 )}
                 <p className="text-xs text-slate-500 dark:text-white/40">Clique no ícone de gráfico em cada disparo (aba Disparos) para preencher os resultados.</p>
+              </div>
+            )}
+
+            {/* ═══ TAB: ESTORNOS ═══ */}
+            {activeTab === 'estornos' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Estornos</h2>
+                  <Button onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20'); setClientRefundOpen(true); }} className="bg-yellow-600 hover:bg-yellow-700 text-white rounded-xl gap-2" size="sm">
+                    <RotateCcw className="h-4 w-4" /> Novo Estorno
+                  </Button>
+                </div>
+
+                {/* Totals cards */}
+                {clientRefundTotals.totalRefundedMessages > 0 && (
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {[
+                      { title: 'Msgs Estornadas', value: fmtN(clientRefundTotals.totalRefundedMessages), color: 'text-yellow-500' },
+                      { title: 'Estorno Bruto', value: `- ${fmt(clientRefundTotals.totalRefundGross)}`, color: 'text-red-500' },
+                      { title: 'Estorno Plataforma', value: `- ${fmt(clientRefundTotals.totalRefundPlatform)}`, color: 'text-orange-500' },
+                      { title: 'Estorno Empresa', value: `- ${fmt(clientRefundTotals.totalRefundCompany)}`, color: 'text-red-500' },
+                      { title: 'Estorno Parceiro', value: `- ${fmt(clientRefundTotals.totalRefundPartner)}`, color: 'text-red-500' },
+                    ].map((s, i) => (
+                      <div key={i} className="bg-white dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.06] rounded-2xl p-4">
+                        <p className="text-[10px] font-medium text-slate-500 dark:text-white/40 uppercase tracking-wider">{s.title}</p>
+                        <p className={`text-lg font-bold mt-1 ${s.color}`}>{s.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Refund history */}
+                {clientRefunds.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 dark:text-white/40">
+                    <RotateCcw className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                    <p>Nenhum estorno registrado.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {clientRefunds.map(r => {
+                      const platformTotal = Number(r.platform_cost_per_message) * r.refunded_messages;
+                      return (
+                        <Card key={r.id} className="bg-white dark:bg-white/[0.04] border-slate-200/80 dark:border-white/[0.06] rounded-2xl">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <h3 className="font-semibold text-sm text-slate-900 dark:text-white">{fmtN(r.refunded_messages)} mensagens estornadas</h3>
+                                <p className="text-xs text-slate-500 dark:text-white/40">
+                                  {new Date(r.created_at).toLocaleDateString('pt-BR')} · {fmt(Number(r.price_per_message))}/msg · Plataforma: {fmt(Number(r.platform_cost_per_message))}/msg
+                                </p>
+                                {r.reason && <p className="text-xs text-slate-400 dark:text-white/30 mt-1">Motivo: {r.reason}</p>}
+                              </div>
+                              <button onClick={() => setDeleteRefundId(r.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Remover estorno">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                              <div><span className="text-slate-500 dark:text-white/40">Estorno Bruto</span><p className="font-semibold text-red-500">- {fmt(Number(r.refund_gross))}</p></div>
+                              <div><span className="text-slate-500 dark:text-white/40">Estorno Plataforma</span><p className="font-semibold text-orange-500">- {fmt(platformTotal)}</p></div>
+                              <div><span className="text-slate-500 dark:text-white/40">Estorno Empresa</span><p className="font-semibold text-red-500">- {fmt(Number(r.refund_company))}</p></div>
+                              <div><span className="text-slate-500 dark:text-white/40">Estorno Parceiro</span><p className="font-semibold text-red-500">- {fmt(Number(r.refund_partner))}</p></div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -877,7 +1055,16 @@ export default function ClientDetailPage() {
                 <div><Label>Cliques</Label><Input type="number" value={dispForm.clickedMessages} onChange={e => setDispForm(f => ({ ...f, clickedMessages: e.target.value }))} placeholder="0" /></div>
               </div>
             </div>
-            <div><Label>Custo Redirecionamento (R$)</Label><Input type="number" step="0.01" value={dispForm.redirectionCost} onChange={e => setDispForm(f => ({ ...f, redirectionCost: e.target.value }))} /></div>
+            <div className="p-3 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/[0.06] space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={!!dispForm.redirectionCost && dispForm.redirectionCost !== '0'} onChange={e => setDispForm(f => ({ ...f, redirectionCost: e.target.checked ? (client?.redirection_cost_per_message ? String(client.redirection_cost_per_message) : '') : '' }))} className="rounded border-slate-300 text-purple-600 focus:ring-purple-500" />
+                <span className="text-sm text-slate-700 dark:text-slate-300 font-medium">Cobrar redirecionamento neste disparo</span>
+              </label>
+              {dispForm.redirectionCost && dispForm.redirectionCost !== '0' && (
+                <div><Label>Valor do Redirecionamento (R$)</Label><Input type="number" step="0.01" value={dispForm.redirectionCost} onChange={e => setDispForm(f => ({ ...f, redirectionCost: e.target.value }))} placeholder="Ex: 50.00" /></div>
+              )}
+              {!dispForm.redirectionCost && <p className="text-xs text-amber-600 dark:text-amber-400">Sem custo de redirecionamento (ex: disparo de teste/validação).</p>}
+            </div>
 
             {/* ── Seção: Base de Contatos (Excel) ── */}
             <div className="p-3 rounded-lg bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/[0.06] space-y-3">
@@ -993,6 +1180,93 @@ export default function ClientDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleDispDelete} className="bg-red-600 hover:bg-red-700 text-white">Remover</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ═══ DIALOG: Estorno de Cliente ═══ */}
+      <Dialog open={clientRefundOpen} onOpenChange={o => { if (!o) { setClientRefundOpen(false); setClientRefundAmount(''); setClientRefundReason(''); setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20'); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Estornar Mensagens do Cliente</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            {/* Mode selector */}
+            <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+              <button type="button" onClick={() => setRefundMode('manual')} className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${refundMode === 'manual' ? 'bg-yellow-600 text-white' : 'bg-transparent text-slate-600 dark:text-white/50 hover:bg-slate-50 dark:hover:bg-white/5'}`}>
+                Valor Manual
+              </button>
+              <button type="button" onClick={() => setRefundMode('package')} className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${refundMode === 'package' ? 'bg-yellow-600 text-white' : 'bg-transparent text-slate-600 dark:text-white/50 hover:bg-slate-50 dark:hover:bg-white/5'}`}>
+                Por Pacote
+              </button>
+            </div>
+
+            {refundMode === 'package' ? (
+              <div>
+                <Label>Pacote *</Label>
+                <select value={refundSelectedPkgId} onChange={e => setRefundSelectedPkgId(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <option value="">Selecione um pacote</option>
+                  {packages.map(pkg => (
+                    <option key={pkg.id} value={String(pkg.id)}>
+                      {pkg.name} — {fmt(Number(pkg.price_per_message))}/msg
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Valor por mensagem (R$) *</Label>
+                  <Input type="number" step="0.01" value={refundManualPrice} onChange={e => setRefundManualPrice(e.target.value)} placeholder="Ex: 0.30" />
+                </div>
+                <div>
+                  <Label>Custo plataforma/msg (R$)</Label>
+                  <Input type="number" step="0.01" value={refundManualPlatform} onChange={e => setRefundManualPlatform(e.target.value)} placeholder="0.20" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <Label>Quantidade de Mensagens *</Label>
+              <Input type="number" value={clientRefundAmount} onChange={e => setClientRefundAmount(e.target.value)} placeholder="Ex: 1000" />
+            </div>
+            <div>
+              <Label>Motivo (opcional)</Label>
+              <Textarea value={clientRefundReason} onChange={e => setClientRefundReason(e.target.value)} rows={2} placeholder="Ex: Base com contatos invalidos" />
+            </div>
+            {/* Preview */}
+            {clientRefundPreview && (
+              <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-500/5 border border-yellow-200 dark:border-yellow-500/15 space-y-1.5 text-xs">
+                <p className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Impacto do Estorno</p>
+                <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Mensagens</span><span className="font-medium text-yellow-800 dark:text-yellow-300">{fmtN(clientRefundPreview.msgs)}</span></div>
+                <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Valor/msg</span><span>{fmt(clientRefundPreview.price)}</span></div>
+                <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Custo plataforma/msg</span><span>{fmt(clientRefundPreview.platform)}</span></div>
+                <div className="border-t border-yellow-200 dark:border-yellow-500/15 pt-1.5 mt-1.5 space-y-1">
+                  <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Estorno bruto</span><span className="text-red-600 font-semibold">- {fmt(clientRefundPreview.gross)}</span></div>
+                  <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Estorno plataforma</span><span className="text-orange-500 font-semibold">- {fmt(clientRefundPreview.platformTotal)}</span></div>
+                  <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Estorno empresa</span><span className="text-red-600 font-semibold">- {fmt(clientRefundPreview.company)}</span></div>
+                  <div className="flex justify-between"><span className="text-yellow-700/70 dark:text-yellow-400/60">Estorno parceiro</span><span className="text-red-600 font-semibold">- {fmt(clientRefundPreview.partner)}</span></div>
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => { setClientRefundOpen(false); setClientRefundAmount(''); setClientRefundReason(''); setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20'); }}>Cancelar</Button>
+              <Button onClick={handleClientRefund} disabled={clientRefundSaving || !clientRefundAmount || parseInt(clientRefundAmount) <= 0} className="bg-yellow-600 hover:bg-yellow-700 text-white gap-2">
+                {clientRefundSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                Aplicar Estorno
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ AlertDialog: Delete Client Refund ═══ */}
+      <AlertDialog open={deleteRefundId !== null} onOpenChange={() => setDeleteRefundId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Remover estorno?</AlertDialogTitle>
+            <AlertDialogDescription>O estorno sera removido e os valores serao restaurados.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteClientRefund} className="bg-red-600 hover:bg-red-700 text-white">Remover</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

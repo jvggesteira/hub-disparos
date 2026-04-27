@@ -6,7 +6,15 @@ export type DisparoClient = {
   id: number; name: string; company: string | null; email: string | null;
   phone: string | null; notes: string | null; is_active: boolean;
   status: 'ativo' | 'pausado' | 'encerrado'; segment: string | null;
+  has_redirection_cost: boolean; redirection_cost_per_message: number;
   created_at: string; updated_at: string;
+};
+
+export type DisparoClientRefund = {
+  id: number; client_id: number; refunded_messages: number;
+  price_per_message: number; platform_cost_per_message: number;
+  refund_gross: number; refund_company: number; refund_partner: number;
+  reason: string | null; created_at: string;
 };
 
 export type DisparoPackage = {
@@ -55,11 +63,13 @@ export async function getDisparoClientById(id: number) {
   return data as DisparoClient;
 }
 
-export async function createDisparoClient(input: { name: string; company?: string; email?: string; phone?: string; notes?: string; status?: string; segment?: string }) {
+export async function createDisparoClient(input: { name: string; company?: string; email?: string; phone?: string; notes?: string; status?: string; segment?: string; has_redirection_cost?: boolean; redirection_cost_per_message?: number }) {
   const { error } = await supabase.from('disparo_clients').insert({
     name: input.name, company: input.company || null, email: input.email || null,
     phone: input.phone || null, notes: input.notes || null, status: input.status || 'ativo',
     segment: input.segment || null,
+    has_redirection_cost: input.has_redirection_cost ?? true,
+    redirection_cost_per_message: input.redirection_cost_per_message ?? 0,
   });
   if (error) throw error;
 }
@@ -297,12 +307,49 @@ export async function getClientStats(clientId: number) {
     totalPartner += net / 2;
   }
 
+  // Client-level refunds: subtract from balance AND from financials
+  const clientRefunds = await getClientRefunds(clientId);
+  const totalClientRefunded = clientRefunds.reduce((s, r) => s + r.refunded_messages, 0);
+  const totalRefundGross = clientRefunds.reduce((s, r) => s + Number(r.refund_gross), 0);
+  const totalRefundPlatform = clientRefunds.reduce((s, r) => s + Number(r.platform_cost_per_message) * r.refunded_messages, 0);
+  const totalRefundCompany = clientRefunds.reduce((s, r) => s + Number(r.refund_company), 0);
+  const totalRefundPartner = clientRefunds.reduce((s, r) => s + Number(r.refund_partner), 0);
+
   return {
-    totalContracted, totalDelivered, totalBalance: totalContracted - totalDelivered,
-    totalGrossRevenue: totalGross, totalPlatformCost,
-    totalCompanyRevenue: totalCompany, totalPartnerRevenue: totalPartner,
-    totalDispatches: allDisps.length,
+    totalContracted, totalDelivered, totalBalance: totalContracted - totalDelivered - totalClientRefunded,
+    totalGrossRevenue: totalGross - totalRefundGross, totalPlatformCost: totalPlatformCost - totalRefundPlatform,
+    totalCompanyRevenue: totalCompany - totalRefundCompany, totalPartnerRevenue: totalPartner - totalRefundPartner,
+    totalDispatches: allDisps.length, totalClientRefunded,
   };
+}
+
+export async function getAllClientsStats(): Promise<Record<number, { totalContracted: number; totalDelivered: number; totalBalance: number; totalDispatches: number }>> {
+  const { data: pkgs } = await supabase.from('disparo_packages').select('*').eq('is_active', true);
+  const { data: disps } = await supabase.from('disparo_dispatches').select('client_id, delivered_messages');
+  let refunds: any[] = [];
+  try { const { data } = await supabase.from('disparo_client_refunds').select('client_id, refunded_messages'); refunds = data || []; } catch {}
+  const allPkgs = pkgs || [];
+  const allDisps = disps || [];
+  const stats: Record<number, { totalContracted: number; totalDelivered: number; totalBalance: number; totalDispatches: number }> = {};
+  for (const pkg of allPkgs) {
+    if (!stats[pkg.client_id]) stats[pkg.client_id] = { totalContracted: 0, totalDelivered: 0, totalBalance: 0, totalDispatches: 0 };
+    stats[pkg.client_id].totalContracted += pkg.contracted_messages;
+  }
+  for (const d of allDisps) {
+    if (!stats[d.client_id]) stats[d.client_id] = { totalContracted: 0, totalDelivered: 0, totalBalance: 0, totalDispatches: 0 };
+    stats[d.client_id].totalDelivered += d.delivered_messages;
+    stats[d.client_id].totalDispatches += 1;
+  }
+  // Aggregate refunded messages per client
+  const refundedByClient: Record<number, number> = {};
+  for (const r of refunds) {
+    refundedByClient[r.client_id] = (refundedByClient[r.client_id] || 0) + r.refunded_messages;
+  }
+  for (const cid of Object.keys(stats)) {
+    const s = stats[Number(cid)];
+    s.totalBalance = s.totalContracted - s.totalDelivered - (refundedByClient[Number(cid)] || 0);
+  }
+  return stats;
 }
 
 export async function getAllClientsOverview() {
@@ -534,6 +581,52 @@ export async function getDispatchResultsForChartEnhanced(clientId: number) {
     });
   }
   return rows;
+}
+
+// ─── Client Refunds ──────────────────────────────────────────────────────────
+
+export async function getClientRefunds(clientId: number) {
+  try {
+    const { data, error } = await supabase.from('disparo_client_refunds').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []) as DisparoClientRefund[];
+  } catch {
+    return [] as DisparoClientRefund[];
+  }
+}
+
+export async function getClientRefundTotals(clientId: number) {
+  const refunds = await getClientRefunds(clientId);
+  return refunds.reduce((acc, r) => ({
+    totalRefundedMessages: acc.totalRefundedMessages + r.refunded_messages,
+    totalRefundGross: acc.totalRefundGross + Number(r.refund_gross),
+    totalRefundPlatform: acc.totalRefundPlatform + Number(r.platform_cost_per_message) * r.refunded_messages,
+    totalRefundCompany: acc.totalRefundCompany + Number(r.refund_company),
+    totalRefundPartner: acc.totalRefundPartner + Number(r.refund_partner),
+  }), { totalRefundedMessages: 0, totalRefundGross: 0, totalRefundPlatform: 0, totalRefundCompany: 0, totalRefundPartner: 0 });
+}
+
+export async function createClientRefund(input: {
+  client_id: number; refunded_messages: number; price_per_message: number;
+  platform_cost_per_message: number; reason?: string;
+}) {
+  const gross = input.price_per_message * input.refunded_messages;
+  const net = (input.price_per_message - input.platform_cost_per_message) * input.refunded_messages;
+  const company = net / 2;
+  const partner = net / 2;
+
+  const { error } = await supabase.from('disparo_client_refunds').insert({
+    client_id: input.client_id, refunded_messages: input.refunded_messages,
+    price_per_message: input.price_per_message, platform_cost_per_message: input.platform_cost_per_message,
+    refund_gross: gross, refund_company: company, refund_partner: partner,
+    reason: input.reason || null,
+  });
+  if (error) throw error;
+}
+
+export async function deleteClientRefund(id: number) {
+  const { error } = await supabase.from('disparo_client_refunds').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function getClientPortalData(clientId: number) {
