@@ -7,13 +7,18 @@ import { useAuth } from '@/hooks/use-auth';
 import { getInitials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight, Send, FileText
+  ChevronLeft, ChevronRight, Send, FileText, ClipboardList, ListOrdered,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Clientes', href: '/clientes', icon: Users },
+  { name: 'Solicitações', href: '/solicitacoes', icon: ClipboardList },
   { name: 'Relatorios', href: '/relatorios', icon: FileText },
+];
+
+const adminNavigation = [
+  { name: 'Fila de Disparos', href: '/solicitacoes/fila', icon: ListOrdered },
 ];
 
 export function Sidebar() {
@@ -89,6 +94,49 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {/* Admin-only items */}
+        {user?.role === 'admin' && (
+          <>
+            {!isCollapsed && (
+              <div className="pt-3 pb-1 px-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/20">Admin</span>
+              </div>
+            )}
+            {adminNavigation.map((item) => {
+              const isActive = pathname.startsWith(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  title={isCollapsed ? item.name : ''}
+                  className={`
+                    group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-200
+                    ${isCollapsed ? 'justify-center' : ''}
+                    ${isActive
+                      ? 'bg-purple-600/15 text-white shadow-sm'
+                      : 'text-white/50 hover:bg-white/5 hover:text-white/80'
+                    }
+                  `}
+                >
+                  <div className="relative flex items-center justify-center">
+                    {isActive && (
+                      <div className="absolute inset-0 rounded-lg bg-purple-500/20 blur-md" />
+                    )}
+                    <Icon className={`relative h-[18px] w-[18px] flex-shrink-0 transition-colors ${isActive ? 'text-purple-400' : 'text-white/40 group-hover:text-white/70'}`} />
+                  </div>
+                  <span className={`whitespace-nowrap transition-all duration-200 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
+                    {item.name}
+                  </span>
+                  {isActive && !isCollapsed && (
+                    <div className="ml-auto h-1.5 w-1.5 rounded-full bg-purple-400 shadow-sm shadow-purple-400/50" />
+                  )}
+                </Link>
+              );
+            })}
+          </>
+        )}
       </nav>
 
       {/* User Section */}

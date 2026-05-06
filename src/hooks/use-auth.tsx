@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, createContext, useContext } from 'react';
-import { createClient } from '@supabase/supabase-js'; 
 import { useRouter } from 'next/navigation';
 import { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
 // --- INTERFACES ---
 interface UserProfile {
@@ -31,20 +31,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   
-  const [supabase] = useState(() => 
-    createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!, 
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true
-        }
-      }
-    )
-  );
-
   const fetchUserProfile = async (supabaseUser: User): Promise<UserProfile | null> => {
     if (!supabaseUser) return null;
     try {
@@ -154,7 +140,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       subscription.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, router]);
+  }, [router]);
 
   const signOut = async () => {
     setIsLoading(true);

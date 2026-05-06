@@ -9,7 +9,7 @@ import type { DisparoClient } from '@/hooks/use-disparos';
 import { useToast } from '@/hooks/use-toast';
 import {
   Users, Plus, Search, ArrowRight, Building2, Mail, Phone,
-  Trash2, Pencil, Loader2, Package, Send, Wallet
+  Trash2, Pencil, Loader2, Package, Send, Wallet, UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -76,6 +76,34 @@ export default function DisparoClientesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [clientStats, setClientStats] = useState<Record<number, { totalContracted: number; totalDelivered: number; totalBalance: number; totalDispatches: number }>>({});
+  const [invitingId, setInvitingId] = useState<number | null>(null);
+
+  // ---------- Invite ----------
+  const handleInvite = async (client: DisparoClient) => {
+    if (!client.email) {
+      toast({ title: 'Cliente sem email', description: 'Cadastre um email para poder convidar.', variant: 'destructive' });
+      return;
+    }
+    setInvitingId(client.id);
+    try {
+      const res = await fetch('/api/invite-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: client.email, clientId: client.id, clientName: client.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({
+        title: data.alreadyExists ? 'Acesso vinculado!' : 'Convite enviado!',
+        description: data.message,
+        className: 'bg-green-600 text-white border-none',
+      });
+    } catch (err: any) {
+      toast({ title: 'Erro ao convidar', description: err.message, variant: 'destructive' });
+    } finally {
+      setInvitingId(null);
+    }
+  };
 
   // ---------- Fetch ----------
   const fetchClients = async () => {
@@ -400,6 +428,14 @@ export default function DisparoClientesPage() {
                         Criado em {new Date(client.created_at).toLocaleDateString('pt-BR')}
                       </span>
                       <div className="flex items-center gap-1">
+                        <button
+                          onClick={e => { e.stopPropagation(); handleInvite(client); }}
+                          disabled={invitingId === client.id}
+                          className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+                          title="Convidar para plataforma"
+                        >
+                          {invitingId === client.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                        </button>
                         <button
                           onClick={e => { e.stopPropagation(); openEdit(client); }}
                           className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
