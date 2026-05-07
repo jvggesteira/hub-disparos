@@ -15,6 +15,7 @@ const navigation = [
   { name: 'Clientes', href: '/clientes', icon: Users },
   { name: 'Solicitações', href: '/solicitacoes', icon: ClipboardList },
   { name: 'Relatorios', href: '/relatorios', icon: FileText },
+  { name: 'Configurações', href: '/configuracoes', icon: Settings },
 ];
 
 const adminNavigation = [

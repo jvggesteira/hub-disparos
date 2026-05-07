@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 // --- INTERFACES ---
@@ -30,8 +30,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
-  
-  const fetchUserProfile = async (supabaseUser: User): Promise<UserProfile | null> => {
+  const signingOut = useRef(false);
+
+  const fetchUserProfile = useCallback(async (supabaseUser: User): Promise<UserProfile | null> => {
     if (!supabaseUser) return null;
     try {
       const { data: profile, error } = await supabase
@@ -55,57 +56,58 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         name: fullName,
         first_name: firstName,
         last_name: lastName,
-        // CORREÇÃO DE SEGURANÇA: Fallback é 'collaborator', nunca 'admin'
-        role: profile?.role || 'collaborator', 
+        role: profile?.role || 'collaborator',
         permissions: profile?.permissions || {},
       };
     } catch (error) {
       console.error("Auth Error (Fallback ativado):", error);
       return {
-          id: supabaseUser.id,
-          email: supabaseUser.email || '',
-          name: 'Usuario',
-          first_name: 'Usuario',
-          last_name: '',
-          role: 'collaborator', // Fallback seguro
-          permissions: {}
+        id: supabaseUser.id,
+        email: supabaseUser.email || '',
+        name: 'Usuario',
+        first_name: 'Usuario',
+        last_name: '',
+        role: 'collaborator',
+        permissions: {}
       };
     }
-  };
+  }, []);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const profile = await fetchUserProfile(session.user);
-        setUser(profile);
-      } else {
+      const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
+      if (error || !supabaseUser) {
         setUser(null);
+      } else {
+        const profile = await fetchUserProfile(supabaseUser);
+        setUser(profile);
       }
     } catch (e) {
       setUser(null);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [fetchUserProfile]);
 
   useEffect(() => {
     let mounted = true;
 
     const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
+        // Usa getUser() que valida o token no servidor, evitando sessões expiradas
+        const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
+
         if (mounted) {
-          if (session?.user) {
-            const profile = await fetchUserProfile(session.user);
+          if (!error && supabaseUser) {
+            const profile = await fetchUserProfile(supabaseUser);
             setUser(profile);
           } else {
             setUser(null);
           }
         }
       } catch (error) {
-        console.error("Erro na inicialização:", error);
+        console.error("Erro na inicializacao:", error);
+        if (mounted) setUser(null);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -114,23 +116,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, session: Session | null) => {
+      async (event, session) => {
         if (!mounted) return;
-        
-        if (session?.user) {
-           if (!user || user.id !== session.user.id) {
-             const profile = await fetchUserProfile(session.user);
-             setUser(profile);
-           }
-        } else {
-           setUser(null);
+
+        // Ignora eventos durante signOut manual (evita loops)
+        if (signingOut.current) return;
+
+        if (event === 'SIGNED_IN' && session?.user) {
+          const profile = await fetchUserProfile(session.user);
+          if (mounted) setUser(profile);
         }
 
-        setIsLoading(false);
+        if (event === 'TOKEN_REFRESHED' && session?.user) {
+          const profile = await fetchUserProfile(session.user);
+          if (mounted) setUser(profile);
+        }
 
         if (event === 'SIGNED_OUT') {
-           router.refresh();
-           router.push('/login');
+          if (mounted) {
+            setUser(null);
+            setIsLoading(false);
+          }
         }
       }
     );
@@ -139,22 +145,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       mounted = false;
       subscription.unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [fetchUserProfile]);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
+    signingOut.current = true;
     setIsLoading(true);
     try {
-        await supabase.auth.signOut();
-        setUser(null);
-        router.push('/login');
-        router.refresh();
+      await supabase.auth.signOut();
+      setUser(null);
+      router.push('/login');
     } catch (error) {
-        console.error("SignOut Error:", error);
+      console.error("SignOut Error:", error);
     } finally {
-        setIsLoading(false);
+      signingOut.current = false;
+      setIsLoading(false);
     }
-  };
+  }, [router]);
 
   return (
     <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, signOut, refreshUser }}>
