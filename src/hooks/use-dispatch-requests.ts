@@ -227,19 +227,24 @@ export type PreviousRequestSummary = {
   media_file_name: string | null;
   created_at: string;
   status: DispatchRequestStatus;
+  profile_photo_url: string | null;
 };
 
 export async function getPreviousRequests(clientId: number, limit = 5): Promise<PreviousRequestSummary[]> {
   const { data, error } = await supabase
     .from('dispatch_requests')
-    .select('id, offer_text, media_url, media_type, media_file_name, created_at, status')
+    .select('id, offer_text, media_url, media_type, media_file_name, created_at, status, dispatch_profiles(profile_photo_url)')
     .eq('client_id', clientId)
     .not('offer_text', 'is', null)
     .neq('status', 'draft')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data || []) as PreviousRequestSummary[];
+  return (data || []).map((r: any) => ({
+    ...r,
+    profile_photo_url: r.dispatch_profiles?.profile_photo_url || null,
+    dispatch_profiles: undefined,
+  })) as PreviousRequestSummary[];
 }
 
 // ─── Dispatch Requests ─────────────────────────────────────────────────────────

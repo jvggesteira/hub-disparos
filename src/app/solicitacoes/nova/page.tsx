@@ -47,6 +47,8 @@ export default function NovaSolicitacaoPage() {
   const [newProfile, setNewProfile] = useState({ name: '', whatsapp_name: '', ddd: '11', redirect_numbers: [''], is_default: false });
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
+  const [reusedProfilePhotoUrl, setReusedProfilePhotoUrl] = useState<string | null>(null);
+  const [showPreviousPhotos, setShowPreviousPhotos] = useState(false);
 
   // Previous requests (reuse)
   const [previousRequests, setPreviousRequests] = useState<PreviousRequestSummary[]>([]);
@@ -206,13 +208,18 @@ export default function NovaSolicitacaoPage() {
     setSaving(true);
     try {
       let photoUrl: string | undefined;
-      if (profilePhotoFile) photoUrl = await uploadProfilePhoto(profilePhotoFile, clientId);
+      if (profilePhotoFile) {
+        photoUrl = await uploadProfilePhoto(profilePhotoFile, clientId);
+      } else if (reusedProfilePhotoUrl) {
+        photoUrl = reusedProfilePhotoUrl;
+      }
       const profile = await createProfile({ client_id: clientId, name: newProfile.name, whatsapp_name: newProfile.whatsapp_name, ddd: newProfile.ddd, profile_photo_url: photoUrl, redirect_numbers: validNumbers, is_default: newProfile.is_default });
       setProfiles((prev) => [...prev, profile]);
       setSelectedProfileId(profile.id);
       setShowNewProfile(false);
       setNewProfile({ name: '', whatsapp_name: '', ddd: '', redirect_numbers: [''], is_default: false });
       setProfilePhotoFile(null);
+      setReusedProfilePhotoUrl(null);
     } catch (err: any) { setToast({ type: 'error', message: err.message }); } finally { setSaving(false); }
   };
 
@@ -337,9 +344,34 @@ export default function NovaSolicitacaoPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div><label className="text-xs text-white/40 mb-1 block">DDD *</label><input type="text" value={newProfile.ddd} onChange={(e) => setNewProfile({ ...newProfile, ddd: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="11" maxLength={3} className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50" /></div>
-                        <div><label className="text-xs text-white/40 mb-1 block">Foto de perfil</label><label className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white/50 cursor-pointer hover:bg-white/[0.06] transition-colors"><Upload className="h-4 w-4" />{profilePhotoFile ? profilePhotoFile.name : 'Selecionar...'}<input type="file" accept="image/*" onChange={(e) => setProfilePhotoFile(e.target.files?.[0] || null)} className="hidden" /></label></div>
+                        <div><label className="text-xs text-white/40 mb-1 block">Foto de perfil</label><label className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white/50 cursor-pointer hover:bg-white/[0.06] transition-colors"><Upload className="h-4 w-4" />{profilePhotoFile ? profilePhotoFile.name : 'Selecionar...'}<input type="file" accept="image/*" onChange={(e) => { setProfilePhotoFile(e.target.files?.[0] || null); setReusedProfilePhotoUrl(null); }} className="hidden" /></label></div>
                       </div>
-                      {profilePhotoPreview && <div className="flex items-center gap-3"><img src={profilePhotoPreview} alt="Preview" className="h-12 w-12 rounded-full object-cover" /><button onClick={() => setProfilePhotoFile(null)} className="text-xs text-red-400 hover:text-red-300">Remover</button></div>}
+                      {(profilePhotoPreview || reusedProfilePhotoUrl) && (
+                        <div className="flex items-center gap-3">
+                          <img src={profilePhotoPreview || reusedProfilePhotoUrl!} alt="Preview" className="h-12 w-12 rounded-full object-cover" />
+                          <button onClick={() => { setProfilePhotoFile(null); setReusedProfilePhotoUrl(null); }} className="text-xs text-red-400 hover:text-red-300">Remover</button>
+                          {reusedProfilePhotoUrl && <span className="text-xs text-purple-400">Foto de perfil anterior</span>}
+                        </div>
+                      )}
+                      {/* Reutilizar foto de perfis anteriores */}
+                      {profiles.filter(p => p.profile_photo_url).length > 0 && !profilePhotoFile && !reusedProfilePhotoUrl && (
+                        <div>
+                          <button type="button" onClick={() => setShowPreviousPhotos(!showPreviousPhotos)} className="flex items-center gap-2 text-xs text-purple-400 hover:text-purple-300 transition-colors">
+                            <History className="h-3.5 w-3.5" />Reutilizar foto de perfil anterior
+                            {showPreviousPhotos ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </button>
+                          {showPreviousPhotos && (
+                            <div className="flex flex-wrap gap-3 mt-2 p-3 rounded-lg border border-white/[0.06] bg-white/[0.01]">
+                              {profiles.filter(p => p.profile_photo_url).map(p => (
+                                <button key={p.id} type="button" onClick={() => { setReusedProfilePhotoUrl(p.profile_photo_url); setProfilePhotoFile(null); setShowPreviousPhotos(false); setToast({ type: 'success', message: `Foto do perfil "${p.name}" selecionada` }); }} className="flex flex-col items-center gap-1.5 p-2 rounded-lg border border-white/[0.06] hover:border-purple-500/30 hover:bg-white/[0.02] transition-colors">
+                                  <img src={p.profile_photo_url!} alt={p.name} className="h-12 w-12 rounded-full object-cover" />
+                                  <span className="text-[10px] text-white/40 truncate max-w-[70px]">{p.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div>
                         <label className="text-xs text-white/40 mb-2 block">Números de redirecionamento *</label>
 
@@ -497,6 +529,7 @@ export default function NovaSolicitacaoPage() {
                             const statusLabels: Record<string, string> = { completed: 'Concluído', submitted: 'Pendente', queued: 'Na fila', processing: 'Processando', failed: 'Falhou', cancelled: 'Cancelado' };
                             return (
                               <div key={req.id} className="flex items-center gap-3 p-3 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                                {req.profile_photo_url ? <img src={req.profile_photo_url} alt="" className="h-8 w-8 rounded-full object-cover flex-shrink-0" /> : <div className="h-8 w-8 rounded-full bg-purple-600/20 flex items-center justify-center flex-shrink-0"><User className="h-4 w-4 text-purple-400" /></div>}
                                 <span className="text-xs text-white/40 whitespace-nowrap">{date}</span>
                                 <p className="flex-1 text-sm text-white/60 truncate min-w-0">{preview}</p>
                                 {req.media_url && <span className="text-xs text-purple-400 whitespace-nowrap">(com {req.media_type === 'video' ? 'vídeo' : 'imagem'})</span>}
