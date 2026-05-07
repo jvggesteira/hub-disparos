@@ -53,9 +53,15 @@ export default function ConfiguracoesPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
+  const isClientUser = user?.role === 'client';
 
-  // Tab state
+  // Tab state — clients always see 'geral' only
   const [activeTab, setActiveTab] = useState<SettingsTab>('usuarios');
+
+  // Force client users to 'geral' tab
+  useEffect(() => {
+    if (isClientUser) setActiveTab('geral');
+  }, [isClientUser]);
 
   // Users state
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -244,10 +250,11 @@ export default function ConfiguracoesPage() {
   // Render
   // ---------------------------------------------------------------------------
 
-  const tabs: { key: SettingsTab; label: string; icon: React.ElementType }[] = [
+  const allTabs: { key: SettingsTab; label: string; icon: React.ElementType }[] = [
     { key: 'usuarios', label: 'Usuarios', icon: Users },
     { key: 'geral', label: 'Geral', icon: Settings },
   ];
+  const tabs = isClientUser ? allTabs.filter(t => t.key === 'geral') : allTabs;
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-[#0c0a1a] transition-colors duration-300">

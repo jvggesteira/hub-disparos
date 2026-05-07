@@ -10,12 +10,12 @@ import {
   ChevronLeft, ChevronRight, Send, FileText, ClipboardList, ListOrdered,
 } from 'lucide-react';
 
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Clientes', href: '/clientes', icon: Users },
-  { name: 'Solicitações', href: '/solicitacoes', icon: ClipboardList },
-  { name: 'Relatorios', href: '/relatorios', icon: FileText },
-  { name: 'Configurações', href: '/configuracoes', icon: Settings },
+const baseNavigation = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, clientVisible: true },
+  { name: 'Clientes', href: '/clientes', icon: Users, clientVisible: false },
+  { name: 'Solicitações', href: '/solicitacoes', icon: ClipboardList, clientVisible: true },
+  { name: 'Relatorios', href: '/relatorios', icon: FileText, clientVisible: false },
+  { name: 'Configurações', href: '/configuracoes', icon: Settings, clientVisible: true },
 ];
 
 const adminNavigation = [
@@ -26,6 +26,15 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const isClientUser = user?.role === 'client';
+
+  // Filter navigation based on role, and add "Meu Painel" link for clients
+  const navigation = isClientUser
+    ? [
+        ...baseNavigation.filter(item => item.clientVisible),
+        ...(user?.client_id ? [{ name: 'Meu Painel', href: `/clientes/${user.client_id}`, icon: Users, clientVisible: true }] : []),
+      ]
+    : baseNavigation;
 
   return (
     <div

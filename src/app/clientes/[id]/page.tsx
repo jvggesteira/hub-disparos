@@ -463,9 +463,11 @@ export default function ClientDetailPage() {
 
             {/* Header */}
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => router.push('/clientes')}>
-                <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
-              </Button>
+              {!isClient && (
+                <Button variant="ghost" size="sm" onClick={() => router.push('/clientes')}>
+                  <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
+                </Button>
+              )}
               <div className="flex-1">
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{client.name}</h1>
@@ -474,7 +476,7 @@ export default function ClientDetailPage() {
                   </span>
                 </div>
                 {client.company && <p className="text-sm text-slate-500 dark:text-white/40">{client.company}</p>}
-                {clientRefundTotals.totalRefundedMessages > 0 && (
+                {!isClient && clientRefundTotals.totalRefundedMessages > 0 && (
                   <div className="flex items-center gap-2 mt-1">
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-yellow-50 dark:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                       {fmtN(clientRefundTotals.totalRefundedMessages)} msgs estornadas
@@ -482,8 +484,8 @@ export default function ClientDetailPage() {
                   </div>
                 )}
               </div>
-              <div className="flex gap-2">
-                {!isClient && (
+              {!isClient && (
+                <div className="flex gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -492,43 +494,43 @@ export default function ClientDetailPage() {
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> Estornar
                   </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl gap-2 text-xs"
-                  onClick={() => {
-                    const url = `${window.location.origin}/acompanhamento/${clientId}`;
-                    navigator.clipboard.writeText(url);
-                    toast({ title: 'Link copiado!', description: 'Cole e envie para o cliente.', className: 'bg-green-600 text-white border-none' });
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" /> Copiar Link
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl gap-2 text-xs"
-                  onClick={() => window.open(`/acompanhamento/${clientId}`, '_blank')}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" /> Visualizar
-                </Button>
-              </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl gap-2 text-xs"
+                    onClick={() => {
+                      const url = `${window.location.origin}/acompanhamento/${clientId}`;
+                      navigator.clipboard.writeText(url);
+                      toast({ title: 'Link copiado!', description: 'Cole e envie para o cliente.', className: 'bg-green-600 text-white border-none' });
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copiar Link
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl gap-2 text-xs"
+                    onClick={() => window.open(`/acompanhamento/${clientId}`, '_blank')}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> Visualizar
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Stats Cards */}
             {stats && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
-                  { title: 'Msgs Contratadas', value: fmtN(stats.totalContracted), icon: Package, color: 'text-yellow-500' },
-                  { title: 'Msgs Entregues', value: fmtN(stats.totalDelivered), icon: Send, color: 'text-blue-500' },
-                  { title: 'Saldo', value: fmtN(stats.totalBalance), icon: Wallet, color: stats.totalBalance < 5000 ? 'text-red-500' : 'text-emerald-500' },
-                  { title: 'Disparos', value: fmtN(stats.totalDispatches), icon: BarChart3, color: 'text-purple-500' },
-                  { title: 'Receita Bruta', value: fmt(stats.totalGrossRevenue), icon: DollarSign, color: 'text-yellow-500' },
-                  { title: 'Custo Plataforma', value: fmt(stats.totalPlatformCost), icon: TrendingUp, color: 'text-red-500' },
-                  { title: 'Receita Empresa', value: fmt(stats.totalCompanyRevenue), icon: BarChart3, color: 'text-emerald-500' },
-                  { title: 'Receita Parceiro', value: fmt(stats.totalPartnerRevenue), icon: BarChart3, color: 'text-blue-500' },
-                ].map((s, i) => (
+                  { title: 'Msgs Contratadas', value: fmtN(stats.totalContracted), icon: Package, color: 'text-yellow-500', financial: false },
+                  { title: 'Msgs Entregues', value: fmtN(stats.totalDelivered), icon: Send, color: 'text-blue-500', financial: false },
+                  { title: 'Saldo', value: fmtN(stats.totalBalance), icon: Wallet, color: stats.totalBalance < 5000 ? 'text-red-500' : 'text-emerald-500', financial: false },
+                  { title: 'Disparos', value: fmtN(stats.totalDispatches), icon: BarChart3, color: 'text-purple-500', financial: false },
+                  { title: 'Receita Bruta', value: fmt(stats.totalGrossRevenue), icon: DollarSign, color: 'text-yellow-500', financial: true },
+                  { title: 'Custo Plataforma', value: fmt(stats.totalPlatformCost), icon: TrendingUp, color: 'text-red-500', financial: true },
+                  { title: 'Receita Empresa', value: fmt(stats.totalCompanyRevenue), icon: BarChart3, color: 'text-emerald-500', financial: true },
+                  { title: 'Receita Parceiro', value: fmt(stats.totalPartnerRevenue), icon: BarChart3, color: 'text-blue-500', financial: true },
+                ].filter(s => !isClient || !s.financial).map((s, i) => (
                   <div key={i} className="bg-white dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.06] rounded-2xl p-4">
                     <div className="flex items-start justify-between">
                       <div>
@@ -545,13 +547,13 @@ export default function ClientDetailPage() {
             {/* Tabs */}
             <div className="flex gap-1 border-b border-slate-200 dark:border-white/[0.06] overflow-x-auto">
               {([
-                { key: 'pacotes', label: 'Pacotes' },
-                { key: 'disparos', label: 'Disparos' },
-                { key: 'estornos', label: `Estornos${clientRefundTotals.totalRefundedMessages > 0 ? ` (${clientRefunds.length})` : ''}` },
-                { key: 'resultados', label: 'Resultados' },
-                { key: 'roi', label: 'ROI & Funil' },
-                { key: 'tendencias', label: 'Tendencias' },
-              ] as const).map(tab => (
+                { key: 'pacotes', label: 'Pacotes', clientVisible: true },
+                { key: 'disparos', label: 'Disparos', clientVisible: true },
+                { key: 'estornos', label: `Estornos${clientRefundTotals.totalRefundedMessages > 0 ? ` (${clientRefunds.length})` : ''}`, clientVisible: false },
+                { key: 'resultados', label: 'Resultados', clientVisible: true },
+                { key: 'roi', label: 'ROI & Funil', clientVisible: false },
+                { key: 'tendencias', label: 'Tendencias', clientVisible: false },
+              ] as const).filter(tab => !isClient || tab.clientVisible).map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                   className={`px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.key ? 'text-purple-600 border-b-2 border-purple-600' : 'text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white'}`}>
                   {tab.label}
@@ -586,7 +588,7 @@ export default function ClientDetailPage() {
                             <div className="flex items-start justify-between mb-3">
                               <div>
                                 <h3 className="font-semibold text-slate-900 dark:text-white">{pkg.name}</h3>
-                                <p className="text-xs text-slate-500 dark:text-white/40">{fmtN(pkg.contracted_messages)} msgs contratadas · {fmt(Number(pkg.price_per_message))}/msg{pkg.purchase_date ? ` · Compra: ${fmtDate(pkg.purchase_date)}` : ''}</p>
+                                <p className="text-xs text-slate-500 dark:text-white/40">{fmtN(pkg.contracted_messages)} msgs contratadas{!isClient ? ` · ${fmt(Number(pkg.price_per_message))}/msg` : ''}{pkg.purchase_date ? ` · Compra: ${fmtDate(pkg.purchase_date)}` : ''}</p>
                               </div>
                               {!isClient && (
                                 <div className="flex gap-1">
@@ -606,11 +608,11 @@ export default function ClientDetailPage() {
                               )}
                             </div>
                             {bal && (
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                              <div className={`grid grid-cols-2 ${!isClient ? 'sm:grid-cols-4' : ''} gap-3 text-xs`}>
                                 <div><span className="text-slate-500 dark:text-white/40">Entregues</span><p className="font-semibold text-slate-900 dark:text-white">{fmtN(bal.totalDelivered)}</p></div>
                                 <div><span className="text-slate-500 dark:text-white/40">Saldo</span><p className={`font-semibold ${bal.balance < 5000 ? 'text-red-500' : 'text-emerald-500'}`}>{fmtN(bal.balance)}</p></div>
-                                <div><span className="text-slate-500 dark:text-white/40">Receita Empresa</span><p className="font-semibold text-emerald-600">{fmt(bal.companyRevenue)}</p></div>
-                                <div><span className="text-slate-500 dark:text-white/40">Receita Parceiro</span><p className="font-semibold text-blue-500">{fmt(bal.partnerRevenue)}</p></div>
+                                {!isClient && <div><span className="text-slate-500 dark:text-white/40">Receita Empresa</span><p className="font-semibold text-emerald-600">{fmt(bal.companyRevenue)}</p></div>}
+                                {!isClient && <div><span className="text-slate-500 dark:text-white/40">Receita Parceiro</span><p className="font-semibold text-blue-500">{fmt(bal.partnerRevenue)}</p></div>}
                                 {bal.refundedMessages > 0 && <div className="col-span-full"><span className="text-yellow-500 text-[10px]">⚠ {fmtN(bal.refundedMessages)} msgs estornadas</span></div>}
                               </div>
                             )}

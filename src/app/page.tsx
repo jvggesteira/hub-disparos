@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { getDashboardStats, getDisparoClients, getClientsWithLowBalance, getAllClientsOverview, getSLAAlerts } from '@/hooks/use-disparos';
 import type { DisparoClient } from '@/hooks/use-disparos';
+import { useAuth } from '@/hooks/use-auth';
 
 type LowBalanceAlert = { clientId: number; clientName: string; clientCompany: string | null; totalBalance: number; totalContracted: number };
 type ClientOverview = Awaited<ReturnType<typeof getAllClientsOverview>>[number];
@@ -209,6 +210,8 @@ function sortClients(data: ClientOverview[], key: SortKey, asc: boolean): Client
 
 export default function DisparosPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const isClient = user?.role === 'client';
 
   // Period filter state
   const [period, setPeriod] = useState<PeriodKey>('all');
@@ -362,21 +365,23 @@ export default function DisparosPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                Gestao de Disparos
+                {isClient ? 'Meus Disparos' : 'Gestao de Disparos'}
               </h1>
               <p className="text-sm text-slate-500 dark:text-white/40 mt-1">
-                Visao geral de todos os clientes e disparos de WhatsApp
+                {isClient ? 'Resumo dos seus disparos de WhatsApp' : 'Visao geral de todos os clientes e disparos de WhatsApp'}
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => router.push('/clientes')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-xl hover:bg-purple-700 transition-colors"
-              >
-                Gerenciar Clientes
-                <ArrowRight className="h-4 w-4" />
-              </button>
+              {!isClient && (
+                <button
+                  onClick={() => router.push('/clientes')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white text-sm font-medium rounded-xl hover:bg-purple-700 transition-colors"
+                >
+                  Gerenciar Clientes
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              )}
 
               {/* Period dropdown */}
               <div className="relative">
@@ -435,7 +440,7 @@ export default function DisparosPage() {
           {/* ---------------------------------------------------------------- */}
           {/* Low balance alert banner                                         */}
           {/* ---------------------------------------------------------------- */}
-          {lowBalanceClients.length > 0 && alertOpen && (
+          {!isClient && lowBalanceClients.length > 0 && alertOpen && (
             <div className="mb-6 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 rounded-2xl p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
@@ -468,7 +473,7 @@ export default function DisparosPage() {
           {/* ---------------------------------------------------------------- */}
           {/* SLA alerts banner                                                */}
           {/* ---------------------------------------------------------------- */}
-          {slaAlerts.length > 0 && slaAlertOpen && (
+          {!isClient && slaAlerts.length > 0 && slaAlertOpen && (
             <div className="mb-6 bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 rounded-2xl p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
@@ -511,11 +516,11 @@ export default function DisparosPage() {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {loading ? (
-                <><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /></>
+                <><StatCardSkeleton /><StatCardSkeleton />{!isClient && <><StatCardSkeleton /><StatCardSkeleton /></>}</>
               ) : (
                 <>
-                  <StatCard title="Clientes Ativos" value={formatNumber(stats?.clientsCount ?? 0)} icon={Users} color="text-purple-600" />
-                  <StatCard title="Pacotes Ativos" value={formatNumber(stats?.packagesCount ?? 0)} icon={Package} color="text-blue-600" />
+                  {!isClient && <StatCard title="Clientes Ativos" value={formatNumber(stats?.clientsCount ?? 0)} icon={Users} color="text-purple-600" />}
+                  {!isClient && <StatCard title="Pacotes Ativos" value={formatNumber(stats?.packagesCount ?? 0)} icon={Package} color="text-blue-600" />}
                   <StatCard title="Total Disparos" value={formatNumber(stats?.totalDispatches ?? 0)} icon={Send} color="text-indigo-600" />
                   <StatCard title="Msgs Entregues" value={formatNumber(stats?.totalDelivered ?? 0)}
                     subtitle={stats && stats.totalSent > 0 ? `${((stats.totalDelivered / stats.totalSent) * 100).toFixed(1)}% de entrega` : undefined}
@@ -554,6 +559,7 @@ export default function DisparosPage() {
           {/* ---------------------------------------------------------------- */}
           {/* Financeiro stats                                                 */}
           {/* ---------------------------------------------------------------- */}
+          {!isClient && (
           <div className="mb-8">
             <h2 className="text-sm font-semibold text-slate-500 dark:text-white/40 uppercase tracking-wider mb-3">
               Financeiro
@@ -571,6 +577,7 @@ export default function DisparosPage() {
               )}
             </div>
           </div>
+          )}
 
           {/* ---------------------------------------------------------------- */}
           {/* Qualidade dos Contatos                                           */}
@@ -610,6 +617,7 @@ export default function DisparosPage() {
           {/* ---------------------------------------------------------------- */}
           {/* VISÃO GERAL POR CLIENTE - Tabela completa                        */}
           {/* ---------------------------------------------------------------- */}
+          {!isClient && (
           <div className="mb-8">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -739,9 +747,12 @@ export default function DisparosPage() {
             )}
           </div>
 
+          )}
+
           {/* ---------------------------------------------------------------- */}
           {/* Clients cards section                                            */}
           {/* ---------------------------------------------------------------- */}
+          {!isClient && (
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -827,6 +838,7 @@ export default function DisparosPage() {
               )}
             </div>
           </div>
+          )}
         </main>
       </div>
     </div>

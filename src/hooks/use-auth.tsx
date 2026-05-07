@@ -14,6 +14,7 @@ interface UserProfile {
   last_name: string;
   role: string;
   permissions: Record<string, any>;
+  client_id: number | null;
 }
 
 interface AuthContextType {
@@ -56,6 +57,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         last_name: nameParts.slice(1).join(' ') || '',
         role: profile?.role || 'collaborator',
         permissions: profile?.permissions || {},
+        client_id: profile?.client_id || null,
       };
     } catch (error) {
       console.error("Auth Error (Fallback):", error);
@@ -66,7 +68,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         first_name: 'Usuario',
         last_name: '',
         role: 'collaborator',
-        permissions: {}
+        permissions: {},
+        client_id: null,
       };
     }
   }, []);

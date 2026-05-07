@@ -68,6 +68,13 @@ export default function DisparoClientesPage() {
   const { user } = useAuth();
   const isClient = user?.role === 'client';
 
+  // Se o usuario e client, redireciona para sua propria pagina de detalhes
+  useEffect(() => {
+    if (isClient && user?.client_id) {
+      router.replace(`/clientes/${user.client_id}`);
+    }
+  }, [isClient, user?.client_id, router]);
+
   const [clients, setClients] = useState<DisparoClient[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
