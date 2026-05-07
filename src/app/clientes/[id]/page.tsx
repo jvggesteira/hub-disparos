@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { Sidebar } from '@/components/custom/sidebar';
 import { Header } from '@/components/custom/header';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -87,6 +88,8 @@ export default function ClientDetailPage() {
   const clientId = Number(params.id);
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isClient = user?.role === 'client';
 
   const [client, setClient] = useState<DisparoClient | null>(null);
   const [packages, setPackages] = useState<DisparoPackage[]>([]);
@@ -480,14 +483,16 @@ export default function ClientDetailPage() {
                 )}
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl gap-2 text-xs border-yellow-300 dark:border-yellow-500/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10"
-                  onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setClientRefundOpen(true); }}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" /> Estornar
-                </Button>
+                {!isClient && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl gap-2 text-xs border-yellow-300 dark:border-yellow-500/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10"
+                    onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setClientRefundOpen(true); }}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Estornar
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -559,9 +564,11 @@ export default function ClientDetailPage() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Pacotes</h2>
-                  <Button onClick={() => { resetPkgForm(); setPkgEditId(null); setPkgOpen(true); }} className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2">
-                    <Plus className="h-4 w-4" /> Novo Pacote
-                  </Button>
+                  {!isClient && (
+                    <Button onClick={() => { resetPkgForm(); setPkgEditId(null); setPkgOpen(true); }} className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2">
+                      <Plus className="h-4 w-4" /> Novo Pacote
+                    </Button>
+                  )}
                 </div>
 
                 {packages.length === 0 ? (
@@ -581,20 +588,22 @@ export default function ClientDetailPage() {
                                 <h3 className="font-semibold text-slate-900 dark:text-white">{pkg.name}</h3>
                                 <p className="text-xs text-slate-500 dark:text-white/40">{fmtN(pkg.contracted_messages)} msgs contratadas · {fmt(Number(pkg.price_per_message))}/msg{pkg.purchase_date ? ` · Compra: ${fmtDate(pkg.purchase_date)}` : ''}</p>
                               </div>
-                              <div className="flex gap-1">
-                                <button onClick={() => { setRefundPkgId(pkg.id); setRefundAmount(''); }}
-                                  className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-yellow-500" title="Estorno">
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                </button>
-                                <button onClick={() => { setPkgEditId(pkg.id); setPkgForm({ name: pkg.name, contractedMessages: String(pkg.contracted_messages), pricePerMessage: String(pkg.price_per_message), platformCost: String(pkg.platform_cost_per_message), notes: pkg.notes || '', purchaseDate: pkg.purchase_date ? toLocalDate(pkg.purchase_date) : '' }); setPkgOpen(true); }}
-                                  className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                                <button onClick={() => setPkgDeleteId(pkg.id)}
-                                  className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Excluir">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
+                              {!isClient && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => { setRefundPkgId(pkg.id); setRefundAmount(''); }}
+                                    className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-yellow-500" title="Estorno">
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button onClick={() => { setPkgEditId(pkg.id); setPkgForm({ name: pkg.name, contractedMessages: String(pkg.contracted_messages), pricePerMessage: String(pkg.price_per_message), platformCost: String(pkg.platform_cost_per_message), notes: pkg.notes || '', purchaseDate: pkg.purchase_date ? toLocalDate(pkg.purchase_date) : '' }); setPkgOpen(true); }}
+                                    className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button onClick={() => setPkgDeleteId(pkg.id)}
+                                    className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Excluir">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                             {bal && (
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -631,9 +640,11 @@ export default function ClientDetailPage() {
                         <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="text-xs bg-white dark:bg-[#0c0a1a] border border-slate-300 dark:border-white/10 rounded-lg px-2 py-1.5 text-slate-900 dark:text-white" />
                       </>
                     )}
-                    <Button onClick={() => { resetDispForm(); setDispEditId(null); setDispOpen(true); }} className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2" size="sm">
-                      <Plus className="h-4 w-4" /> Novo Disparo
-                    </Button>
+                    {!isClient && (
+                      <Button onClick={() => { resetDispForm(); setDispEditId(null); setDispOpen(true); }} className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2" size="sm">
+                        <Plus className="h-4 w-4" /> Novo Disparo
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -657,18 +668,20 @@ export default function ClientDetailPage() {
                                   {fmtDate(d.dispatch_date)} · {pkg?.name || 'Pacote removido'}
                                 </p>
                               </div>
-                              <div className="flex gap-1">
-                                <button onClick={() => openResultForm(d.id)} className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-purple-500" title="Resultados">
-                                  <BarChart3 className="h-3.5 w-3.5" />
-                                </button>
-                                <button onClick={() => { setDispEditId(d.id); setDispForm({ packageId: String(d.package_id), name: d.name, dispatchDate: toLocalDate(d.dispatch_date), sentMessages: String(d.sent_messages), deliveredMessages: String(d.delivered_messages), readMessages: d.read_messages ? String(d.read_messages) : '', repliedMessages: d.replied_messages ? String(d.replied_messages) : '', clickedMessages: d.clicked_messages ? String(d.clicked_messages) : '', redirectionCost: d.redirection_cost ? String(d.redirection_cost) : '', notes: d.notes || '', contactFileUrl: d.contact_file_url || '', contactFileName: d.contact_file_name || '', contactCount: d.contact_count ? String(d.contact_count) : '', redirectNumbers: (d.redirect_numbers || []).join('\n') }); setDispFile(null); setDispOpen(true); }}
-                                  className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                                <button onClick={() => setDispDeleteId(d.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Excluir">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
+                              {!isClient && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => openResultForm(d.id)} className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-purple-500" title="Resultados">
+                                    <BarChart3 className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button onClick={() => { setDispEditId(d.id); setDispForm({ packageId: String(d.package_id), name: d.name, dispatchDate: toLocalDate(d.dispatch_date), sentMessages: String(d.sent_messages), deliveredMessages: String(d.delivered_messages), readMessages: d.read_messages ? String(d.read_messages) : '', repliedMessages: d.replied_messages ? String(d.replied_messages) : '', clickedMessages: d.clicked_messages ? String(d.clicked_messages) : '', redirectionCost: d.redirection_cost ? String(d.redirection_cost) : '', notes: d.notes || '', contactFileUrl: d.contact_file_url || '', contactFileName: d.contact_file_name || '', contactCount: d.contact_count ? String(d.contact_count) : '', redirectNumbers: (d.redirect_numbers || []).join('\n') }); setDispFile(null); setDispOpen(true); }}
+                                    className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Editar">
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button onClick={() => setDispDeleteId(d.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Excluir">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                             <div className="grid grid-cols-3 gap-3 mt-3 text-xs">
                               <div><span className="text-slate-500 dark:text-white/40">Enviadas</span><p className="font-semibold text-slate-900 dark:text-white">{fmtN(d.sent_messages)}</p></div>
@@ -749,9 +762,11 @@ export default function ClientDetailPage() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Estornos</h2>
-                  <Button onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20'); setClientRefundOpen(true); }} className="bg-yellow-600 hover:bg-yellow-700 text-white rounded-xl gap-2" size="sm">
-                    <RotateCcw className="h-4 w-4" /> Novo Estorno
-                  </Button>
+                  {!isClient && (
+                    <Button onClick={() => { setClientRefundAmount(''); setClientRefundReason(''); setRefundMode('manual'); setRefundSelectedPkgId(''); setRefundManualPrice(''); setRefundManualPlatform('0.20'); setClientRefundOpen(true); }} className="bg-yellow-600 hover:bg-yellow-700 text-white rounded-xl gap-2" size="sm">
+                      <RotateCcw className="h-4 w-4" /> Novo Estorno
+                    </Button>
+                  )}
                 </div>
 
                 {/* Totals cards */}
@@ -793,9 +808,11 @@ export default function ClientDetailPage() {
                                 </p>
                                 {r.reason && <p className="text-xs text-slate-400 dark:text-white/30 mt-1">Motivo: {r.reason}</p>}
                               </div>
-                              <button onClick={() => setDeleteRefundId(r.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Remover estorno">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              {!isClient && (
+                                <button onClick={() => setDeleteRefundId(r.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500" title="Remover estorno">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                               <div><span className="text-slate-500 dark:text-white/40">Estorno Bruto</span><p className="font-semibold text-red-500">- {fmt(Number(r.refund_gross))}</p></div>

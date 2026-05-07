@@ -196,6 +196,52 @@ export async function deleteProfile(id: string) {
   if (error) throw error;
 }
 
+// ─── Previous Redirect Numbers (for reuse in new profiles) ─────────────────────
+
+export type PreviousRedirectNumbers = {
+  id: string;
+  name: string;
+  whatsapp_name: string;
+  redirect_numbers: string[];
+  created_at: string;
+};
+
+export async function getPreviousRedirectNumbers(clientId: number, limit = 5): Promise<PreviousRedirectNumbers[]> {
+  const { data, error } = await supabase
+    .from('dispatch_profiles')
+    .select('id, name, whatsapp_name, redirect_numbers, created_at')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).filter((p: any) => p.redirect_numbers && p.redirect_numbers.length > 0) as PreviousRedirectNumbers[];
+}
+
+// ─── Previous Requests (for reuse) ──────────────────────────────────────────────
+
+export type PreviousRequestSummary = {
+  id: string;
+  offer_text: string | null;
+  media_url: string | null;
+  media_type: 'image' | 'video' | null;
+  media_file_name: string | null;
+  created_at: string;
+  status: DispatchRequestStatus;
+};
+
+export async function getPreviousRequests(clientId: number, limit = 5): Promise<PreviousRequestSummary[]> {
+  const { data, error } = await supabase
+    .from('dispatch_requests')
+    .select('id, offer_text, media_url, media_type, media_file_name, created_at, status')
+    .eq('client_id', clientId)
+    .not('offer_text', 'is', null)
+    .neq('status', 'draft')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []) as PreviousRequestSummary[];
+}
+
 // ─── Dispatch Requests ─────────────────────────────────────────────────────────
 
 export async function getRequestsByClient(clientId: number) {

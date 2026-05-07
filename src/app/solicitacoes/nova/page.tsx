@@ -9,13 +9,15 @@ import {
   ArrowLeft, ArrowRight, Check, Upload, X, Plus,
   Loader2, Image, Video, FileSpreadsheet, User,
   Calendar, Clock, MessageSquare, Trash2, Star, Send, AlertTriangle, Info,
+  History, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import {
   createRequest, updateRequest, submitRequest,
   getProfilesByClient, createProfile, uploadMedia,
   uploadContactList, uploadProfilePhoto, getClientIdForUser,
-  getMinScheduleDate, validateScheduleDate,
-  type DispatchProfile,
+  getMinScheduleDate, validateScheduleDate, getPreviousRequests,
+  getPreviousRedirectNumbers,
+  type DispatchProfile, type PreviousRequestSummary, type PreviousRedirectNumbers,
 } from '@/hooks/use-dispatch-requests';
 
 const STEPS = [
@@ -45,6 +47,16 @@ export default function NovaSolicitacaoPage() {
   const [newProfile, setNewProfile] = useState({ name: '', whatsapp_name: '', ddd: '11', redirect_numbers: [''], is_default: false });
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
+
+  // Previous requests (reuse)
+  const [previousRequests, setPreviousRequests] = useState<PreviousRequestSummary[]>([]);
+  const [showPreviousRequests, setShowPreviousRequests] = useState(false);
+  const [reusedFromDate, setReusedFromDate] = useState<string | null>(null);
+
+  // Previous redirect numbers (reuse in new profile)
+  const [previousRedirectNumbers, setPreviousRedirectNumbers] = useState<PreviousRedirectNumbers[]>([]);
+  const [showPreviousNumbers, setShowPreviousNumbers] = useState(false);
+  const [newNumberInput, setNewNumberInput] = useState('');
 
   // Offer
   const [offerText, setOfferText] = useState('');
@@ -89,6 +101,13 @@ export default function NovaSolicitacaoPage() {
       const def = p.find((pr) => pr.is_default);
       if (def && !selectedProfileId) setSelectedProfileId(def.id);
     }).catch(console.error);
+  }, [clientId]);
+
+  // Load previous requests for reuse
+  useEffect(() => {
+    if (!clientId) return;
+    getPreviousRequests(clientId).then(setPreviousRequests).catch(console.error);
+    getPreviousRedirectNumbers(clientId).then(setPreviousRedirectNumbers).catch(console.error);
   }, [clientId]);
 
   // Load schedule rules when client is known + recalcula ao entrar no step 3
@@ -182,6 +201,8 @@ export default function NovaSolicitacaoPage() {
     if (!newProfile.name || !newProfile.whatsapp_name || !newProfile.ddd) { setToast({ type: 'error', message: 'Preencha todos os campos obrigatórios do perfil.' }); return; }
     const validNumbers = newProfile.redirect_numbers.filter((n) => n.trim());
     if (validNumbers.length === 0) { setToast({ type: 'error', message: 'Adicione pelo menos um número de redirecionamento.' }); return; }
+    const invalidNumbers = validNumbers.filter((n) => n.length < 10 || n.length > 13);
+    if (invalidNumbers.length > 0) { setToast({ type: 'error', message: 'Números inválidos detectados. Cada número deve ter entre 10 e 13 dígitos.' }); return; }
     setSaving(true);
     try {
       let photoUrl: string | undefined;
@@ -320,14 +341,122 @@ export default function NovaSolicitacaoPage() {
                       </div>
                       {profilePhotoPreview && <div className="flex items-center gap-3"><img src={profilePhotoPreview} alt="Preview" className="h-12 w-12 rounded-full object-cover" /><button onClick={() => setProfilePhotoFile(null)} className="text-xs text-red-400 hover:text-red-300">Remover</button></div>}
                       <div>
-                        <label className="text-xs text-white/40 mb-1 block">Números de redirecionamento *</label>
-                        {newProfile.redirect_numbers.map((num, i) => (
-                          <div key={i} className="flex items-center gap-2 mb-2">
-                            <input type="text" value={num} onChange={(e) => { const nums = [...newProfile.redirect_numbers]; nums[i] = e.target.value.replace(/\D/g, ''); setNewProfile({ ...newProfile, redirect_numbers: nums }); }} placeholder="5511999998888" className="flex-1 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50" />
-                            {newProfile.redirect_numbers.length > 1 && <button onClick={() => { const nums = newProfile.redirect_numbers.filter((_, j) => j !== i); setNewProfile({ ...newProfile, redirect_numbers: nums }); }} className="p-2 text-red-400/50 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
+                        <label className="text-xs text-white/40 mb-2 block">Números de redirecionamento *</label>
+
+                        {/* Reutilizar números de perfis anteriores */}
+                        {previousRedirectNumbers.length > 0 && (
+                          <div className="mb-3">
+                            <button
+                              type="button"
+                              onClick={() => setShowPreviousNumbers(!showPreviousNumbers)}
+                              className="flex items-center gap-2 text-xs text-purple-400 hover:text-purple-300 transition-colors mb-2"
+                            >
+                              <History className="h-3.5 w-3.5" />
+                              Reutilizar números de perfil anterior
+                              {showPreviousNumbers ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                            </button>
+                            {showPreviousNumbers && (
+                              <div className="space-y-2 p-3 rounded-lg border border-white/[0.06] bg-white/[0.01] mb-3">
+                                {previousRedirectNumbers.map((prev) => (
+                                  <div key={prev.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-white/[0.04] hover:border-purple-500/30 hover:bg-white/[0.02] transition-colors">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs text-white/70 font-medium truncate">{prev.name} ({prev.whatsapp_name})</p>
+                                      <p className="text-xs text-white/40 truncate">
+                                        {prev.redirect_numbers.map((n) => {
+                                          if (n.length >= 12) return `(${n.slice(2, 4)}) ${n.slice(4, 9)}-${n.slice(9)}`;
+                                          if (n.length >= 10) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+                                          return n;
+                                        }).join(', ')}
+                                      </p>
+                                      <p className="text-xs text-white/20">{new Date(prev.created_at).toLocaleDateString('pt-BR')}</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const existing = newProfile.redirect_numbers.filter((n) => n.trim());
+                                        const merged = [...existing];
+                                        prev.redirect_numbers.forEach((n) => { if (!merged.includes(n)) merged.push(n); });
+                                        setNewProfile({ ...newProfile, redirect_numbers: merged.length > 0 ? merged : [''] });
+                                        setShowPreviousNumbers(false);
+                                      }}
+                                      className="px-2.5 py-1 text-xs bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 rounded-md transition-colors whitespace-nowrap"
+                                    >
+                                      Usar estes
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        ))}
-                        <button onClick={() => setNewProfile({ ...newProfile, redirect_numbers: [...newProfile.redirect_numbers, ''] })} className="text-xs text-purple-400 hover:text-purple-300">+ Adicionar número</button>
+                        )}
+
+                        {/* Chips de números */}
+                        {newProfile.redirect_numbers.some((n) => n.trim()) && (
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {newProfile.redirect_numbers.map((num, i) => {
+                              if (!num.trim()) return null;
+                              const formatted = num.length >= 12
+                                ? `(${num.slice(2, 4)}) ${num.slice(4, 9)}-${num.slice(9)}`
+                                : num.length >= 10
+                                  ? `(${num.slice(0, 2)}) ${num.slice(2, 7)}-${num.slice(7)}`
+                                  : num;
+                              return (
+                                <span key={i} className="inline-flex items-center gap-1.5 bg-purple-100 dark:bg-purple-500/15 text-purple-700 dark:text-purple-300 rounded-full px-3 py-1 text-xs font-medium">
+                                  {formatted}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nums = newProfile.redirect_numbers.filter((_, j) => j !== i);
+                                      setNewProfile({ ...newProfile, redirect_numbers: nums.length > 0 ? nums : [''] });
+                                    }}
+                                    className="text-purple-400 hover:text-red-500 transition-colors"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Input para adicionar número */}
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={newNumberInput}
+                            onChange={(e) => setNewNumberInput(e.target.value.replace(/\D/g, ''))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const num = newNumberInput.trim();
+                                if (num.length < 10 || num.length > 13) { setToast({ type: 'error', message: 'Número inválido. Use 10-13 dígitos (com ou sem código do país).' }); return; }
+                                if (newProfile.redirect_numbers.includes(num)) { setToast({ type: 'error', message: 'Número já adicionado.' }); return; }
+                                const existing = newProfile.redirect_numbers.filter((n) => n.trim());
+                                setNewProfile({ ...newProfile, redirect_numbers: [...existing, num] });
+                                setNewNumberInput('');
+                              }
+                            }}
+                            placeholder="5511999998888 (Enter para adicionar)"
+                            className="flex-1 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const num = newNumberInput.trim();
+                              if (num.length < 10 || num.length > 13) { setToast({ type: 'error', message: 'Número inválido. Use 10-13 dígitos (com ou sem código do país).' }); return; }
+                              if (newProfile.redirect_numbers.includes(num)) { setToast({ type: 'error', message: 'Número já adicionado.' }); return; }
+                              const existing = newProfile.redirect_numbers.filter((n) => n.trim());
+                              setNewProfile({ ...newProfile, redirect_numbers: [...existing, num] });
+                              setNewNumberInput('');
+                            }}
+                            className="flex items-center gap-1 px-3 py-2 border border-dashed border-purple-500/30 text-purple-400 hover:text-purple-300 hover:border-purple-500/50 rounded-lg text-xs font-medium transition-colors"
+                          >
+                            <Plus className="h-3.5 w-3.5" />Adicionar
+                          </button>
+                        </div>
+                        {newProfile.redirect_numbers.filter((n) => n.trim()).length === 0 && (
+                          <p className="text-xs text-white/20 mt-1.5">Digite o número e pressione Enter ou clique em Adicionar</p>
+                        )}
                       </div>
                       <label className="flex items-center gap-2 text-sm text-white/60"><input type="checkbox" checked={newProfile.is_default} onChange={(e) => setNewProfile({ ...newProfile, is_default: e.target.checked })} className="rounded bg-white/[0.06] border-white/[0.1]" />Definir como perfil padrão</label>
                       <div className="flex items-center gap-3 pt-2">
@@ -344,6 +473,65 @@ export default function NovaSolicitacaoPage() {
                 <div>
                   <h2 className="text-lg font-semibold text-white mb-1">Oferta e Mídia</h2>
                   <p className="text-sm text-white/40 mb-6">Defina o texto da oferta e anexe a mídia (opcional).</p>
+
+                  {/* Reutilizar copy anterior */}
+                  {previousRequests.length > 0 && (
+                    <div className="mb-5 rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+                      <button
+                        onClick={() => setShowPreviousRequests(!showPreviousRequests)}
+                        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <History className="h-4 w-4 text-purple-400" />
+                          <span className="text-sm font-medium text-white/70">Reutilizar copy anterior</span>
+                          <span className="text-xs text-white/30">({previousRequests.length})</span>
+                        </div>
+                        {showPreviousRequests ? <ChevronUp className="h-4 w-4 text-white/30" /> : <ChevronDown className="h-4 w-4 text-white/30" />}
+                      </button>
+                      {showPreviousRequests && (
+                        <div className="px-4 pb-4 space-y-2">
+                          {previousRequests.map((req) => {
+                            const date = new Date(req.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                            const preview = req.offer_text ? (req.offer_text.length > 50 ? req.offer_text.slice(0, 50) + '...' : req.offer_text) : '(sem texto)';
+                            const statusColors: Record<string, string> = { completed: 'bg-emerald-500/15 text-emerald-400', submitted: 'bg-yellow-500/15 text-yellow-400', queued: 'bg-blue-500/15 text-blue-400', processing: 'bg-blue-500/15 text-blue-400', failed: 'bg-red-500/15 text-red-400', cancelled: 'bg-white/10 text-white/40' };
+                            const statusLabels: Record<string, string> = { completed: 'Concluído', submitted: 'Pendente', queued: 'Na fila', processing: 'Processando', failed: 'Falhou', cancelled: 'Cancelado' };
+                            return (
+                              <div key={req.id} className="flex items-center gap-3 p-3 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                                <span className="text-xs text-white/40 whitespace-nowrap">{date}</span>
+                                <p className="flex-1 text-sm text-white/60 truncate min-w-0">{preview}</p>
+                                {req.media_url && <span className="text-xs text-purple-400 whitespace-nowrap">(com {req.media_type === 'video' ? 'vídeo' : 'imagem'})</span>}
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${statusColors[req.status] || 'bg-white/10 text-white/40'}`}>{statusLabels[req.status] || req.status}</span>
+                                <button
+                                  onClick={() => {
+                                    if (req.offer_text) setOfferText(req.offer_text);
+                                    if (req.media_url) setMediaInfo({ url: req.media_url, type: req.media_type || 'image', size: 0, name: req.media_file_name || 'mídia anterior' });
+                                    setReusedFromDate(date);
+                                    setShowPreviousRequests(false);
+                                    setToast({ type: 'success', message: `Copy carregada do disparo de ${date}` });
+                                  }}
+                                  className="px-2.5 py-1 text-xs font-medium text-purple-400 border border-purple-500/30 rounded-lg hover:bg-purple-600/10 transition-colors whitespace-nowrap"
+                                >
+                                  Usar
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Badge de copy reutilizada */}
+                  {reusedFromDate && (
+                    <div className="mb-4 flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-xs text-purple-400">
+                        <History className="h-3 w-3" />
+                        Copy carregada do disparo de {reusedFromDate}
+                      </span>
+                      <button onClick={() => setReusedFromDate(null)} className="text-white/30 hover:text-white/50"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
+
                   <div className="space-y-4">
                     <div>
                       <label className="text-xs text-white/40 mb-1 block">Texto da oferta * <span className="text-white/20">({offerText.length} caracteres)</span></label>

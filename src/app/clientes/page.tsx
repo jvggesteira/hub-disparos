@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/custom/sidebar';
 import { Header } from '@/components/custom/header';
+import { useAuth } from '@/hooks/use-auth';
 import { getDisparoClients, createDisparoClient, updateDisparoClient, deleteDisparoClient, getAllClientsStats } from '@/hooks/use-disparos';
 import type { DisparoClient } from '@/hooks/use-disparos';
 import { useToast } from '@/hooks/use-toast';
@@ -64,6 +65,8 @@ const FILTER_OPTIONS = [
 export default function DisparoClientesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isClient = user?.role === 'client';
 
   const [clients, setClients] = useState<DisparoClient[]>([]);
   const [search, setSearch] = useState('');
@@ -289,13 +292,15 @@ export default function DisparoClientesPage() {
                 {clients.length} {clients.length === 1 ? 'cliente' : 'clientes'} cadastrado{clients.length === 1 ? '' : 's'}
               </p>
             </div>
-            <Button
-              onClick={() => { setForm({ ...emptyForm }); setCreateOpen(true); }}
-              className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Cliente
-            </Button>
+            {!isClient && (
+              <Button
+                onClick={() => { setForm({ ...emptyForm }); setCreateOpen(true); }}
+                className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Novo Cliente
+              </Button>
+            )}
           </div>
 
           {/* Status filter pills */}
@@ -342,13 +347,15 @@ export default function DisparoClientesPage() {
               <p className="text-slate-600 dark:text-slate-400 mb-4">
                 Nenhum cliente cadastrado ainda.
               </p>
-              <Button
-                onClick={() => { setForm({ ...emptyForm }); setCreateOpen(true); }}
-                className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Criar primeiro cliente
-              </Button>
+              {!isClient && (
+                <Button
+                  onClick={() => { setForm({ ...emptyForm }); setCreateOpen(true); }}
+                  className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Criar primeiro cliente
+                </Button>
+              )}
             </div>
           )}
 
@@ -428,28 +435,34 @@ export default function DisparoClientesPage() {
                         Criado em {new Date(client.created_at).toLocaleDateString('pt-BR')}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button
-                          onClick={e => { e.stopPropagation(); handleInvite(client); }}
-                          disabled={invitingId === client.id}
-                          className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
-                          title="Convidar para plataforma"
-                        >
-                          {invitingId === client.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                        </button>
-                        <button
-                          onClick={e => { e.stopPropagation(); openEdit(client); }}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
-                          title="Editar"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={e => { e.stopPropagation(); setDeleteId(client.id); }}
-                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                          title="Remover"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {!isClient && (
+                          <button
+                            onClick={e => { e.stopPropagation(); handleInvite(client); }}
+                            disabled={invitingId === client.id}
+                            className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+                            title="Convidar para plataforma"
+                          >
+                            {invitingId === client.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                          </button>
+                        )}
+                        {!isClient && (
+                          <button
+                            onClick={e => { e.stopPropagation(); openEdit(client); }}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                            title="Editar"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {!isClient && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setDeleteId(client.id); }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                            title="Remover"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                         <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </div>
