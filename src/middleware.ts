@@ -2,49 +2,42 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  // --- REGRA DE OURO (A SOLUÇÃO) ---
-  // Se a rota for da API, libera imediatamente.
-  // Isso impede que o middleware tente autenticar rotas de dados e retorne HTML de login.
+  // Rotas de API — libera sem tocar em auth
   if (request.nextUrl.pathname.startsWith('/api')) {
     return NextResponse.next();
   }
 
-  // 1. Prepara a resposta padrão
   let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+    request: { headers: request.headers },
   });
 
   try {
-      // 2. Tenta gerenciar cookies (apenas se tiver o pacote instalado)
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return request.cookies.getAll();
-            },
-            setAll(cookiesToSet) {
-              cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
-              response = NextResponse.next({
-                request: {
-                  headers: request.headers,
-                },
-              });
-              cookiesToSet.forEach(({ name, value, options }) =>
-                response.cookies.set(name, value, options)
-              );
-            },
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
           },
-        }
-      );
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+            response = NextResponse.next({
+              request: { headers: request.headers },
+            });
+            cookiesToSet.forEach(({ name, value, options }) =>
+              response.cookies.set(name, value, options)
+            );
+          },
+        },
+      }
+    );
 
-      await supabase.auth.getUser();
+    // getSession() apenas sincroniza cookies sem fazer chamada de rede
+    // Isso evita latencia e loops causados por getUser()
+    await supabase.auth.getSession();
   } catch (e) {
-      // Se der erro no Supabase (ex: pacote faltando), apenas segue o jogo
-      // para não derrubar o site.
+    // Falha silenciosa — nao derruba o site
   }
 
   return response;

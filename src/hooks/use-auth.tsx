@@ -31,9 +31,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const signingOut = useRef(false);
+  const initialized = useRef(false);
 
-  const fetchUserProfile = useCallback(async (supabaseUser: User): Promise<UserProfile | null> => {
-    if (!supabaseUser) return null;
+  const buildProfile = useCallback(async (supabaseUser: User): Promise<UserProfile> => {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -47,20 +47,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       const fullName = profile?.name || supabaseUser.email?.split('@')[0] || 'Usuario';
       const nameParts = fullName.split(' ');
-      const firstName = nameParts[0];
-      const lastName = nameParts.slice(1).join(' ') || '';
 
       return {
         id: supabaseUser.id,
         email: supabaseUser.email || '',
         name: fullName,
-        first_name: firstName,
-        last_name: lastName,
+        first_name: nameParts[0],
+        last_name: nameParts.slice(1).join(' ') || '',
         role: profile?.role || 'collaborator',
         permissions: profile?.permissions || {},
       };
     } catch (error) {
-      console.error("Auth Error (Fallback ativado):", error);
+      console.error("Auth Error (Fallback):", error);
       return {
         id: supabaseUser.id,
         email: supabaseUser.email || '',
@@ -75,61 +73,53 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
-      if (error || !supabaseUser) {
-        setUser(null);
-      } else {
-        const profile = await fetchUserProfile(supabaseUser);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const profile = await buildProfile(session.user);
         setUser(profile);
+      } else {
+        setUser(null);
       }
     } catch (e) {
       setUser(null);
     } finally {
       setIsLoading(false);
     }
-  }, [fetchUserProfile]);
+  }, [buildProfile]);
 
   useEffect(() => {
+    // Previne dupla inicializacao (React StrictMode)
+    if (initialized.current) return;
+    initialized.current = true;
+
     let mounted = true;
 
-    const initializeAuth = async () => {
-      try {
-        // Usa getUser() que valida o token no servidor, evitando sessões expiradas
-        const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
-
-        if (mounted) {
-          if (!error && supabaseUser) {
-            const profile = await fetchUserProfile(supabaseUser);
-            setUser(profile);
-          } else {
-            setUser(null);
-          }
-        }
-      } catch (error) {
-        console.error("Erro na inicializacao:", error);
-        if (mounted) setUser(null);
-      } finally {
-        if (mounted) setIsLoading(false);
-      }
-    };
-
-    initializeAuth();
-
+    // Usa onAuthStateChange com INITIAL_SESSION como unica fonte de verdade
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
-
-        // Ignora eventos durante signOut manual (evita loops)
         if (signingOut.current) return;
 
+        if (event === 'INITIAL_SESSION') {
+          // Primeira verificacao — usa a sessao local (rapido, sem rede)
+          if (session?.user) {
+            const profile = await buildProfile(session.user);
+            if (mounted) setUser(profile);
+          } else {
+            if (mounted) setUser(null);
+          }
+          if (mounted) setIsLoading(false);
+          return;
+        }
+
         if (event === 'SIGNED_IN' && session?.user) {
-          const profile = await fetchUserProfile(session.user);
+          const profile = await buildProfile(session.user);
           if (mounted) setUser(profile);
         }
 
         if (event === 'TOKEN_REFRESHED' && session?.user) {
-          const profile = await fetchUserProfile(session.user);
-          if (mounted) setUser(profile);
+          // Token renovado — nao precisa re-buscar perfil, so atualiza se necessario
+          // Nao faz nada agressivo aqui para evitar loops
         }
 
         if (event === 'SIGNED_OUT') {
@@ -145,14 +135,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchUserProfile]);
+  }, [buildProfile]);
 
   const signOut = useCallback(async () => {
     signingOut.current = true;
-    setIsLoading(true);
     try {
-      await supabase.auth.signOut();
       setUser(null);
+      await supabase.auth.signOut();
       router.push('/login');
     } catch (error) {
       console.error("SignOut Error:", error);

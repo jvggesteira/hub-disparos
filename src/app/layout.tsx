@@ -5,7 +5,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import AuthGuard from "@/components/custom/auth-guard";
 import "./globals.css";
 import { ThemeProvider } from "@/context/theme-context";
-import SessionProvider from "@/components/providers/session-provider";
+
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,13 +31,11 @@ export default function RootLayout({
     <html lang="pt-BR" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider>
-            <SessionProvider>
-                <AuthProvider>
-                    <AuthGuard>
-                        {children}
-                    </AuthGuard>
-                </AuthProvider>
-            </SessionProvider>
+            <AuthProvider>
+                <AuthGuard>
+                    {children}
+                </AuthGuard>
+            </AuthProvider>
         </ThemeProvider>
         <Toaster />
       </body>
