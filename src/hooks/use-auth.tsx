@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
-// --- INTERFACES ---
 interface UserProfile {
   id: string;
   email: string;
@@ -32,7 +31,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const signingOut = useRef(false);
-  const initialized = useRef(false);
 
   const buildProfile = useCallback(async (supabaseUser: User): Promise<UserProfile> => {
     try {
@@ -42,9 +40,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .eq('id', supabaseUser.id)
         .maybeSingle();
 
-      if (error) {
-        console.warn("Erro ao buscar perfil:", error.message);
-      }
+      if (error) console.warn("Erro ao buscar perfil:", error.message);
 
       const fullName = profile?.name || supabaseUser.email?.split('@')[0] || 'Usuario';
       const nameParts = fullName.split(' ');
@@ -83,7 +79,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         setUser(null);
       }
-    } catch (e) {
+    } catch {
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -91,39 +87,36 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [buildProfile]);
 
   useEffect(() => {
-    // Previne dupla inicializacao (React StrictMode)
-    if (initialized.current) return;
-    initialized.current = true;
-
     let mounted = true;
 
-    // Usa onAuthStateChange com INITIAL_SESSION como unica fonte de verdade
+    // 1. Busca sessao do cache local IMEDIATAMENTE (sem rede)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
+      if (session?.user) {
+        const profile = await buildProfile(session.user);
+        if (mounted) setUser(profile);
+      }
+      if (mounted) setIsLoading(false);
+    });
+
+    // 2. Escuta mudancas de auth (login, logout, refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (!mounted) return;
-        if (signingOut.current) return;
+        if (!mounted || signingOut.current) return;
 
-        if (event === 'INITIAL_SESSION') {
-          // Primeira verificacao — usa a sessao local (rapido, sem rede)
-          if (session?.user) {
-            const profile = await buildProfile(session.user);
-            if (mounted) setUser(profile);
-          } else {
-            if (mounted) setUser(null);
-          }
-          if (mounted) setIsLoading(false);
-          return;
-        }
+        // INITIAL_SESSION: ja tratamos acima com getSession(), ignorar
+        if (event === 'INITIAL_SESSION') return;
 
         if (event === 'SIGNED_IN' && session?.user) {
           const profile = await buildProfile(session.user);
-          if (mounted) setUser(profile);
+          if (mounted) {
+            setUser(profile);
+            setIsLoading(false);
+          }
         }
 
-        if (event === 'TOKEN_REFRESHED' && session?.user) {
-          // Token renovado — nao precisa re-buscar perfil, so atualiza se necessario
-          // Nao faz nada agressivo aqui para evitar loops
-        }
+        // TOKEN_REFRESHED: sessao continua valida, nao precisa fazer nada
+        // O Supabase ja atualizou o token internamente
 
         if (event === 'SIGNED_OUT') {
           if (mounted) {
@@ -134,9 +127,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     );
 
+    // 3. Safety valve: se isLoading nao resolver em 5s, forca resolucao
+    const safetyTimeout = setTimeout(() => {
+      if (mounted) setIsLoading(false);
+    }, 5000);
+
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      clearTimeout(safetyTimeout);
     };
   }, [buildProfile]);
 
@@ -144,13 +143,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signingOut.current = true;
     try {
       setUser(null);
+      setIsLoading(false);
       await supabase.auth.signOut();
       router.push('/login');
     } catch (error) {
       console.error("SignOut Error:", error);
     } finally {
       signingOut.current = false;
-      setIsLoading(false);
     }
   }, [router]);
 
